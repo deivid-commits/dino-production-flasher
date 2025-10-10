@@ -524,29 +524,6 @@ class FlasherApp:
         else:
             self.log_queue.put(("Firebase", "⚠️ Firebase connection failed. Logs will not be saved."))
 
-    def start_comprehensive_logging(self):
-        """Start comprehensive logging to Firebase for debugging."""
-        try:
-            # Send initial startup log
-            self.log_queue.put(("Firebase", "🚀 Starting DinoCore Production Flasher v1.2.13"))
-            self.log_queue.put(("Firebase", f"📍 Working directory: {os.getcwd()}"))
-            self.log_queue.put(("Firebase", f"🐍 Python version: {sys.version}"))
-
-            # Try to initialize Firebase if available
-            if FIREBASE_AVAILABLE:
-                try:
-                    if init_firebase_with_credentials():
-                        self.log_queue.put(("Firebase", "✅ Firebase initialized successfully"))
-                    else:
-                        self.log_queue.put(("Firebase", "⚠️ Firebase initialization failed"))
-                except Exception as e:
-                    self.log_queue.put(("Firebase", f"❌ Firebase error: {e}"))
-            else:
-                self.log_queue.put(("Firebase", "⚠️ Firebase not available"))
-
-        except Exception as e:
-            print(f"Error in comprehensive logging: {e}")
-
     def create_widgets(self):
         # Modern header with gradient and branding
         header_frame = tk.Frame(self.root, bg=self.colors['header_bg'], height=60)
