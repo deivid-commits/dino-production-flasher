@@ -299,29 +299,14 @@ class DinoUpdater:
         try:
             print("   🔄 Checking Python dependencies...")
 
-            # First, try to install/upgrade all dependencies
+            # Use pip to upgrade dependencies
             result = subprocess.run([
                 sys.executable, '-m', 'pip', 'install', '-r',
                 os.path.join(self.current_dir, 'requirements.txt'),
                 '--upgrade', '--quiet'
             ], capture_output=True, text=True, timeout=120)
 
-            if result.returncode != 0:
-                print(f"   ⚠️  Initial dependency update failed: {result.stderr}")
-                # Try without --quiet to see what's happening
-                print("   🔄 Retrying dependency installation with verbose output...")
-                result = subprocess.run([
-                    sys.executable, '-m', 'pip', 'install', '-r',
-                    os.path.join(self.current_dir, 'requirements.txt'),
-                    '--upgrade'
-                ], capture_output=True, text=True, timeout=120)
-
-            if result.returncode == 0:
-                print("   ✅ Dependencies updated successfully")
-                return True
-            else:
-                print(f"   ❌ Dependency update failed: {result.stderr}")
-                return False
+            return result.returncode == 0
 
         except Exception as e:
             print(f"   ⚠️  Failed to update dependencies: {e}")

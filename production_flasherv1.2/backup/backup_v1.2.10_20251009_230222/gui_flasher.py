@@ -764,27 +764,23 @@ class FlasherApp:
                 tab_name = "Firebase"
 
             log_view = self.log_views[tab_name]
+            
+            # Determine icon
+            icon = self.icons['info']
+            if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str:
+                icon = self.icons['success']
+            elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str:
+                icon = self.icons['error']
+            elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str:
+                icon = self.icons['warning']
+            elif "Bluetooth" in message_str or "BLE" in message_str:
+                icon = self.icons['bt']
+            elif "Firebase" in message_str:
+                icon = self.icons['firebase']
+            elif "Flash" in message_str or "esptool" in message_str:
+                icon = self.icons['flash']
 
-            # Special handling for single-line progress updates
-            if "Flashing..." in message_str and "%" in message_str:
-                log_view.update_last_line(message_str)
-            else:
-                # Determine icon for new log entries
-                icon = self.icons['info']
-                if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str:
-                    icon = self.icons['success']
-                elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str:
-                    icon = self.icons['error']
-                elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str:
-                    icon = self.icons['warning']
-                elif "Bluetooth" in message_str or "BLE" in message_str:
-                    icon = self.icons['bt']
-                elif "Firebase" in message_str:
-                    icon = self.icons['firebase']
-                elif "Flash" in message_str or "esptool" in message_str:
-                    icon = self.icons['flash']
-                
-                log_view.add_log_entry(message_str, icon)
+            log_view.add_log_entry(message_str, icon)
 
         self.root.after(100, self.update_log)
 
@@ -1487,19 +1483,6 @@ class LogViewer(tk.Frame):
         # Auto-scroll to the bottom
         self.canvas.update_idletasks()
         self.canvas.yview_moveto(1.0)
-        self.last_entry = entry_frame
-
-    def update_last_line(self, message):
-        """Overwrites the last log entry, used for progress updates."""
-        if hasattr(self, 'last_entry') and self.last_entry.winfo_exists():
-            # Find the text label in the last entry and update it
-            for widget in self.last_entry.winfo_children():
-                if isinstance(widget, tk.Label) and not widget.cget("image"):
-                    widget.config(text=message.strip())
-                    return
-        
-        # If no last line or it was destroyed, just add a new line
-        self.add_log_entry(message, self.icons['flash'])
 
 if __name__ == "__main__":
     root = tk.Tk()
