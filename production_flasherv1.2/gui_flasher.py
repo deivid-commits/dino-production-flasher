@@ -483,10 +483,13 @@ class FlasherApp:
         self.create_widgets()
         self.update_log()
         
-        # Initialize Firebase
+        # Initialize Firebase and logging
         if FIREBASE_AVAILABLE:
             init_thread = threading.Thread(target=self.initialize_firebase, daemon=True)
             init_thread.start()
+
+        # Start comprehensive logging immediately
+        self.start_comprehensive_logging()
 
         self.root.after(200, self.ask_hardware_version)
 
