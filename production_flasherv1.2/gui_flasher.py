@@ -531,83 +531,75 @@ class FlasherApp:
             tk.Label(config_inner, text=_("🔄 Auto-update system not available"), font=("Segoe UI", 9),
                     bg=self.colors['frame_bg'], fg=self.colors['log_text']).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Status and control section
-        status_frame = tk.LabelFrame(content_frame, text=f" 🎮 {_('Control Panel')} ", font=("Segoe UI", 11, "bold"),
-                                    bg=self.colors['frame_bg'], fg=self.colors['text'],
-                                    relief=tk.GROOVE, borderwidth=2)
-        status_frame.pack(fill=tk.X, pady=(0, 15))
-        self.status_frame = status_frame  # Store reference for progress bar
+        # --- Main Control Area ---
+        control_area = tk.Frame(content_frame, bg=self.colors['bg'])
+        control_area.pack(fill=tk.X, pady=(0, 15))
 
-        status_inner = tk.Frame(status_frame, bg=self.colors['frame_bg'])
-        status_inner.pack(fill=tk.X, padx=15, pady=10)
-
-        # Status display
-        self.status_label = tk.Label(status_inner, text="🔌 " + _("Connect ESP32 Device"), font=("Segoe UI", 16, "bold"),
+        # --- Status Display ---
+        self.status_label = tk.Label(control_area, text="🔌 " + _("Connect ESP32 Device"), font=("Segoe UI", 16, "bold"),
                                     bg=self.colors['status_idle'], fg="white", pady=8, padx=15,
                                     relief=tk.FLAT)
         self.status_label.pack(fill=tk.X, pady=(0, 10))
+        
+        # --- Progress Bar ---
+        self.progress_bar = ttk.Progressbar(control_area, orient='horizontal', length=100, mode='determinate', style="TProgressbar")
+        self.progress_visible = False # Will be packed/unpacked as needed
 
-        # Progress bar (hidden initially)
-        progress_frame = tk.Frame(status_inner, bg=self.colors['frame_bg'])
-        # Initialize progress bar but don't show yet
-        self.progress_bar = ttk.Progressbar(status_frame, orient='horizontal', length=100, mode='determinate',
-                                           style="TProgressbar")
-        self.progress_visible = False
-
-        # Action buttons
-        self.button_frame = tk.Frame(status_inner, bg=self.colors['frame_bg'])
-        self.button_frame.pack(fill=tk.X, pady=(10, 0))
-
+        # --- Button Configuration ---
         button_config = {
-            'font': ("Segoe UI", 14, "bold"),
+            'font': ("Segoe UI", 12, "bold"),
             'relief': tk.FLAT,
             'borderwidth': 0,
-            'pady': 15
+            'pady': 12
         }
 
-        # Create a grid layout for the buttons (2x2 grid)
-        button_container = tk.Frame(self.button_frame, bg=self.colors['frame_bg'])
-        button_container.pack(fill=tk.BOTH, expand=True)
+        # --- Flashing Section ---
+        flash_frame = tk.LabelFrame(control_area, text=f" ⚡ {_('Firmware Flashing')} ", font=("Segoe UI", 11, "bold"),
+                                    bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.GROOVE, borderwidth=2)
+        flash_frame.pack(fill=tk.X, pady=(10, 5))
 
-        # Top row
-        top_row = tk.Frame(button_container, bg=self.colors['frame_bg'])
-        top_row.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        flash_inner = tk.Frame(flash_frame, bg=self.colors['frame_bg'])
+        flash_inner.pack(fill=tk.X, padx=15, pady=10)
 
-        self.prod_button = tk.Button(top_row, text=_("🏭 Flash Production"),
+        self.prod_button = tk.Button(flash_inner, text=_("🏭 Flash Production"),
                                     bg=self.colors['prod_btn'], fg=self.colors['bg'],
                                     command=lambda: self.start_flashing('production'), state='disabled', **button_config)
-        self.prod_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        self.prod_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        self.test_button = tk.Button(top_row, text=_("🧪 Flash Testing"),
+        self.test_button = tk.Button(flash_inner, text=_("🧪 Flash Testing & eFuse"),
                                     bg=self.colors['test_btn'], fg=self.colors['bg'],
                                     command=lambda: self.start_flashing('testing'), state='disabled', **button_config)
-        self.test_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        self.test_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
-        # Bottom row (Manual BT Select and QC)
-        bottom_row = tk.Frame(button_container, bg=self.colors['frame_bg'])
-        bottom_row.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        # --- Quality Control Section ---
+        qc_frame = tk.LabelFrame(control_area, text=f" 🔵 {_('Bluetooth Quality Control (QC)')} ", font=("Segoe UI", 11, "bold"),
+                                    bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.GROOVE, borderwidth=2)
+        qc_frame.pack(fill=tk.X, pady=(5, 0))
+
+        qc_inner = tk.Frame(qc_frame, bg=self.colors['frame_bg'])
+        qc_inner.pack(fill=tk.X, padx=15, pady=10)
 
         if BT_QC_AVAILABLE and BLEAK_AVAILABLE:
-            self.bt_select_button = tk.Button(bottom_row, text=_("📡 Select BT Device"),
+            self.bt_select_button = tk.Button(qc_inner, text=_("📡 Scan & Test Device"),
                                             bg='#f9e2af', fg=self.colors['bg'], # Yellow
                                             command=self.start_manual_bt_selection, state='normal', **button_config)
-            self.bt_select_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+            self.bt_select_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-            self.bt_qc_button = tk.Button(bottom_row, text=_("🔵 BLUETOOTH QC"),
+            self.bt_qc_button = tk.Button(qc_inner, text=_("▶️ Run QC (After Flash)"),
                                         bg='#7b68ee', fg=self.colors['bg'],  # Medium slate blue
                                         command=self.start_bluetooth_qc, state='disabled', **button_config)
-            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
         else:
             # Show disabled buttons if Bluetooth not available
-            self.bt_select_button = tk.Button(bottom_row, text=_("📡 BT UNAVAILABLE"),
+            self.bt_select_button = tk.Button(qc_inner, text=_("📡 BT UNAVAILABLE"),
                                         bg='#6c7086', fg=self.colors['bg'],
                                         state='disabled', **button_config)
-            self.bt_select_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+            self.bt_select_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
             
-            self.bt_qc_button = tk.Button(bottom_row, text=_("🔵 BT UNAVAILABLE"),
+            self.bt_qc_button = tk.Button(qc_inner, text=_("🔵 BT UNAVAILABLE"),
                                         bg='#6c7086', fg=self.colors['bg'],
                                         state='disabled', **button_config)
-            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
         self.show_mode_buttons()
 
@@ -960,7 +952,7 @@ class FlasherApp:
         selection_thread.start()
 
     async def manual_bt_selection_async(self):
-        """Async function to scan and select a BT device."""
+        """Async function to scan, select, and immediately test a BT device."""
         try:
             bt_qc_tester = get_bluetooth_qc_tester()
             bt_qc_tester.set_log_queue(self.log_queue)
@@ -976,6 +968,10 @@ class FlasherApp:
             if selected_device:
                 self.log_queue.put(f"User selected: {selected_device.name} ({selected_device.address})")
                 self.set_captured_ble_details(selected_device.address, selected_device.name)
+                
+                # Automatically start the QC test
+                self.log_queue.put("Device selected. Starting QC test automatically...")
+                self.start_bluetooth_qc_mode()
             else:
                 self.log_queue.put("User cancelled selection.")
 
@@ -1154,11 +1150,24 @@ class FlasherApp:
 
             # Variables for selection
             selected_device_var = tk.StringVar()
+            all_device_frames = []
+
+            def on_radio_select():
+                try:
+                    selected_index = int(selected_device_var.get())
+                    for idx, frame in enumerate(all_device_frames):
+                        if idx == selected_index:
+                            frame.config(bg=self.colors['frame_bg'])
+                        else:
+                            frame.config(bg=self.colors['bg'])
+                except (ValueError, IndexError):
+                    pass
 
             # Create radio buttons for each device
             for i, device in enumerate(devices):
-                device_frame = tk.Frame(scrollable_frame, bg=self.colors['bg'])
+                device_frame = tk.Frame(scrollable_frame, bg=self.colors['bg'], relief=tk.SOLID, borderwidth=1, highlightbackground=self.colors['frame_bg'])
                 device_frame.pack(fill=tk.X, pady=5, padx=10)
+                all_device_frames.append(device_frame)
 
                 # Device info
                 device_name = device.name or "Unknown Device"
@@ -1173,10 +1182,14 @@ class FlasherApp:
                     font=("Segoe UI", 10),
                     bg=self.colors['bg'],
                     fg=self.colors['text'],
-                    selectcolor=self.colors['highlight'],
+                    selectcolor=self.colors['bg'], # Make radio circle blend in
+                    activebackground=self.colors['bg'],
+                    activeforeground=self.colors['highlight'],
+                    highlightthickness=0,
+                    command=on_radio_select,
                     anchor="w"
                 )
-                radio_btn.pack(anchor="w", fill=tk.X)
+                radio_btn.pack(anchor="w", fill=tk.X, padx=5, pady=5)
 
                 # Add some styling
                 if 'dino' in device_name.lower():
