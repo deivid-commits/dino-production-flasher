@@ -17,8 +17,7 @@ import configparser
 import asyncio
 from tkinter import simpledialog
 import bleak
-from typing import Optional
-from PIL import Image, ImageTk, ImageDraw, ImageFont
+from PIL import Image, ImageTk
 
 # Import internationalization system
 from i18n_utils import _, translation_manager
@@ -476,8 +475,6 @@ class FlasherApp:
             'bt': create_icon_from_emoji("🔵", self.colors['highlight']),
             'firebase': create_icon_from_emoji("🔥", "#f5a97f"),
             'flash': create_icon_from_emoji("⚡", "#f9e2af"),
-            'en_flag': create_icon_from_emoji("🇺🇸", "#000000"), # Color doesn't matter for flag
-            'zh_flag': create_icon_from_emoji("🇨🇳", "#000000"),
         }
 
         self.create_widgets()
@@ -544,21 +541,16 @@ class FlasherApp:
         tk.Label(title_frame, text="v1.2.0", font=("Segoe UI", 10), bg=self.colors['header_bg'],
                 fg=self.colors['log_text']).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Language selection buttons
-        lang_frame = tk.Frame(header_content, bg=self.colors['header_bg'])
-        lang_frame.pack(side=tk.RIGHT, padx=(20, 0))
-
-        self.en_button = tk.Button(lang_frame, text=" English", font=("Segoe UI", 10),
-                                   image=self.icons['en_flag'], compound='left',
-                                   bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.FLAT,
-                                   command=lambda: self.set_language('en'))
-        self.en_button.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.zh_button = tk.Button(lang_frame, text=" 中文", font=("Segoe UI", 10),
-                                   image=self.icons['zh_flag'], compound='left',
-                                   bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.FLAT,
-                                   command=lambda: self.set_language('zh_CN'))
-        self.zh_button.pack(side=tk.LEFT)
+        # Language cycle button
+        lang_names = {'en': 'EN', 'zh_CN': '简中', 'zh_TW': '繁中'}
+        current_lang = translation_manager.get_current_language()
+        self.language_button = tk.Button(header_content,
+                                        text=f"🌐 {lang_names.get(current_lang, 'EN')}",
+                                        font=("Segoe UI", 9, "bold"),
+                                        bg=self.colors['header_bg'], fg=self.colors['text'],
+                                        relief=tk.FLAT, borderwidth=0,
+                                        command=self.cycle_language)
+        self.language_button.pack(side=tk.RIGHT, padx=(10, 0))
 
         # Connection status indicator
         self.connection_label = tk.Label(header_content, text=_("🔗 SERVER ONLINE"),
@@ -571,12 +563,12 @@ class FlasherApp:
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Configuration section
-        self.config_frame = tk.LabelFrame(content_frame, text=f" ⚙️ {_('Configuration')} ", font=("Segoe UI", 11, "bold"),
+        config_frame = tk.LabelFrame(content_frame, text=f" ⚙️ {_('Configuration')} ", font=("Segoe UI", 11, "bold"),
                                     bg=self.colors['frame_bg'], fg=self.colors['text'],
                                     relief=tk.GROOVE, borderwidth=2)
-        self.config_frame.pack(fill=tk.X, pady=(0, 15))
+        config_frame.pack(fill=tk.X, pady=(0, 15))
 
-        config_inner = tk.Frame(self.config_frame, bg=self.colors['frame_bg'])
+        config_inner = tk.Frame(config_frame, bg=self.colors['frame_bg'])
         config_inner.pack(fill=tk.X, padx=15, pady=10)
 
         tk.Label(config_inner, text=_("🎯 Target HW Version:"), font=("Segoe UI", 12, "bold"),
@@ -598,17 +590,17 @@ class FlasherApp:
                     bg=self.colors['frame_bg'], fg=self.colors['log_text']).pack(side=tk.LEFT, padx=(10, 0))
 
         # --- Main Control Area ---
-        self.control_area = tk.Frame(content_frame, bg=self.colors['bg'])
-        self.control_area.pack(fill=tk.X, pady=(0, 15))
+        control_area = tk.Frame(content_frame, bg=self.colors['bg'])
+        control_area.pack(fill=tk.X, pady=(0, 15))
 
         # --- Status Display ---
-        self.status_label = tk.Label(self.control_area, text="🔌 " + _("Connect ESP32 Device"), font=("Segoe UI", 16, "bold"),
+        self.status_label = tk.Label(control_area, text="🔌 " + _("Connect ESP32 Device"), font=("Segoe UI", 16, "bold"),
                                     bg=self.colors['status_idle'], fg="white", pady=8, padx=15,
                                     relief=tk.FLAT)
         self.status_label.pack(fill=tk.X, pady=(0, 10))
         
         # --- Progress Bar ---
-        self.progress_bar = ttk.Progressbar(self.control_area, orient='horizontal', length=100, mode='determinate', style="TProgressbar")
+        self.progress_bar = ttk.Progressbar(control_area, orient='horizontal', length=100, mode='determinate', style="TProgressbar")
         self.progress_visible = False # Will be packed/unpacked as needed
 
         # --- Button Configuration ---
@@ -620,11 +612,11 @@ class FlasherApp:
         }
 
         # --- Flashing Section ---
-        self.flash_frame = tk.LabelFrame(self.control_area, text=f" ⚡ {_('Firmware Flashing')} ", font=("Segoe UI", 11, "bold"),
+        flash_frame = tk.LabelFrame(control_area, text=f" ⚡ {_('Firmware Flashing')} ", font=("Segoe UI", 11, "bold"),
                                     bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.GROOVE, borderwidth=2)
-        self.flash_frame.pack(fill=tk.X, pady=(10, 5))
+        flash_frame.pack(fill=tk.X, pady=(10, 5))
 
-        flash_inner = tk.Frame(self.flash_frame, bg=self.colors['frame_bg'])
+        flash_inner = tk.Frame(flash_frame, bg=self.colors['frame_bg'])
         flash_inner.pack(fill=tk.X, padx=15, pady=10)
 
         self.prod_button = tk.Button(flash_inner, text=_("🏭 Flash Production"),
@@ -638,11 +630,11 @@ class FlasherApp:
         self.test_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
         # --- Quality Control Section ---
-        self.qc_frame = tk.LabelFrame(self.control_area, text=f" 🔵 {_('Bluetooth Quality Control (QC)')} ", font=("Segoe UI", 11, "bold"),
+        qc_frame = tk.LabelFrame(control_area, text=f" 🔵 {_('Bluetooth Quality Control (QC)')} ", font=("Segoe UI", 11, "bold"),
                                     bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.GROOVE, borderwidth=2)
-        self.qc_frame.pack(fill=tk.X, pady=(5, 0))
+        qc_frame.pack(fill=tk.X, pady=(5, 0))
 
-        qc_inner = tk.Frame(self.qc_frame, bg=self.colors['frame_bg'])
+        qc_inner = tk.Frame(qc_frame, bg=self.colors['frame_bg'])
         qc_inner.pack(fill=tk.X, padx=15, pady=10)
 
         if BT_QC_AVAILABLE and BLEAK_AVAILABLE:
@@ -680,14 +672,13 @@ class FlasherApp:
         self.log_views = {}
         for tab_name in ["USB/Serial", "Bluetooth", "Firebase"]:
             frame = tk.Frame(self.notebook, bg=self.colors['frame_bg'])
-            self.notebook.add(frame, text=_(tab_name))
+            self.notebook.add(frame, text=tab_name)
             log_view = LogViewer(frame, self.colors, self.icons)
             log_view.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             self.log_views[tab_name] = log_view
 
-        # Start connection monitoring and set initial UI state
+        # Start connection monitoring
         self.update_connection_status()
-        self.update_language_buttons()
 
     def is_font_available(self, font_name):
         """Check if a font is available on the system"""
@@ -748,8 +739,7 @@ class FlasherApp:
                         self.progress_bar['value'] = message_info[1]
                     elif message_info[0] == 'show_progress':
                         if not self.progress_visible:
-                            # Pack it inside the main control area, right after the status label
-                            self.progress_bar.pack(in_=self.control_area, fill=tk.X, pady=5, after=self.status_label)
+                            self.progress_bar.pack(in_=self.status_frame, fill=tk.X, pady=5, before=self.button_frame)
                             self.progress_visible = True
                     elif message_info[0] == 'hide_progress':
                         if self.progress_visible:
@@ -856,22 +846,28 @@ class FlasherApp:
             
             time.sleep(2)
 
-    def set_language(self, lang_code):
-        """Set the application language and update UI."""
-        if translation_manager.set_language(lang_code):
+    def cycle_language(self):
+        """Cycle through available languages: EN -> ZH_CN -> ZH_TW -> EN"""
+        current_lang = translation_manager.get_current_language()
+        languages = ['en', 'zh_CN', 'zh_TW']
+
+        try:
+            current_index = languages.index(current_lang)
+            next_index = (current_index + 1) % len(languages)
+        except ValueError:
+            next_index = 1  # Default to zh_CN if current not found
+
+        next_lang = languages[next_index]
+
+        if translation_manager.set_language(next_lang):
+            # Update button text
+            lang_names = {'en': 'EN', 'zh_CN': '简中', 'zh_TW': '繁中'}
+            self.language_button.config(text=f"🌐 {lang_names.get(next_lang, 'EN')}")
+
+            # Refresh all UI texts to new language
             self.update_all_texts()
         else:
             messagebox.showerror(_("Error"), _("Failed to change language"))
-
-    def update_language_buttons(self):
-        """Update the visual state of language buttons."""
-        current_lang = translation_manager.get_current_language()
-        if current_lang == 'en':
-            self.en_button.config(relief=tk.SUNKEN, bg=self.colors['highlight'])
-            self.zh_button.config(relief=tk.FLAT, bg=self.colors['frame_bg'])
-        elif current_lang.startswith('zh'):
-            self.zh_button.config(relief=tk.SUNKEN, bg=self.colors['highlight'])
-            self.en_button.config(relief=tk.FLAT, bg=self.colors['frame_bg'])
 
     def check_for_updates(self):
         """Check for updates and show results in log"""
@@ -1355,38 +1351,16 @@ class FlasherApp:
         self.log_queue.put("=" * 50)
 
     def update_all_texts(self):
-        """Update all interface texts after language change."""
-        self.root.title(_("🦕 DinoCore Production Flasher v1.2.0"))
+        """Update all interface texts after language change"""
+        # Update window title
+        self.root.title(_(WINDOW_TITLE))
+
+        # Update title label
         self.title_label.config(text=_("DinoCore Production Flasher"))
-        
-        # Header
-        self.connection_label.config(text=_("🔗 SERVER ONLINE")) # Will be updated by status check
-        
-        # Config Frame
-        self.config_frame.config(text=f" ⚙️ {_('Configuration')} ")
-        self.update_button.config(text=_("🔄 Check Updates"))
-        
-        # Control Area
-        self.flash_frame.config(text=f" ⚡ {_('Firmware Flashing')} ")
-        self.prod_button.config(text=_("🏭 Flash Production"))
-        self.test_button.config(text=_("🧪 Flash Testing & eFuse"))
-        
-        self.qc_frame.config(text=f" 🔵 {_('Bluetooth Quality Control (QC)')} ")
-        self.bt_select_button.config(text=_("📡 Scan & Test Device"))
-        self.bt_qc_button.config(text=_("▶️ Run QC (After Flash)"))
 
-        # Log Tabs
-        self.notebook.tab(0, text=_("USB/Serial"))
-        self.notebook.tab(1, text=_("Bluetooth"))
-        self.notebook.tab(2, text=_("Firebase"))
-
-        # Update status label text if it's in a default state
-        current_status = self.status_label.cget("text")
-        if "Connect ESP32 Device" in current_status or "连接ESP32设备" in current_status:
-             self.status_label.config(text="🔌 " + _("Connect ESP32 Device"))
-        
-        # Update language button states
-        self.update_language_buttons()
+        # Refresh interface - will be handled by the translation system
+        # Since we use _() calls, they will automatically get new translations
+        # The next time the interface is redrawn, it will show the new language
 
 
 
@@ -1407,11 +1381,8 @@ class VersionDialog:
             self.photo = ImageTk.PhotoImage(img)
             img_label = tk.Label(self.top, image=self.photo, bg=colors['bg'])
             img_label.pack(pady=10, padx=20)
-        except (FileNotFoundError, Image.UnidentifiedImageError) as e:
-            print(f"Could not load PCB example image: {e}")
-            # If image fails to load, show a text placeholder instead of crashing
-            tk.Label(self.top, text=_("Image pcb_example.png not found or is corrupt."), 
-                     bg=colors['bg'], fg=colors['warning_btn']).pack(pady=10)
+        except FileNotFoundError:
+            tk.Label(self.top, text=_("Image not found."), bg=colors['bg'], fg=colors['text']).pack(pady=10)
 
         # Label
         label = tk.Label(self.top, text=_("Please enter the version number printed on the PCB:"), font=("Segoe UI", 12), bg=colors['bg'], fg=colors['text'])
