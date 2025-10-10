@@ -377,6 +377,30 @@ class FlasherApp:
         self.root.geometry("800x700")
         self.root.resizable(True, True)
 
+        # --- Set App Icon ---
+        try:
+            # Create a simple image with the emoji for the icon
+            # This is a cross-platform way to set an icon without needing an .ico file
+            from PIL import Image, ImageDraw, ImageFont
+            
+            # Create a blank image with transparency
+            icon_image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(icon_image)
+            
+            # Try to load a suitable font
+            try:
+                font = ImageFont.truetype("seguiemj.ttf", 48)
+            except IOError:
+                font = ImageFont.load_default()
+
+            # Draw the emoji centered on the image
+            draw.text((32, 32), "🦕", font=font, anchor="mm", fill="#89dceb")
+            
+            self.app_icon = ImageTk.PhotoImage(icon_image)
+            self.root.iconphoto(True, self.app_icon)
+        except Exception as e:
+            print(f"Could not set app icon: {e}") # Non-critical error
+
         # Ultra-Modern Dark Theme
         self.colors = {
             'bg': '#1e1e2e',           # Deep dark blue-grey
@@ -474,7 +498,7 @@ class FlasherApp:
         title_frame = tk.Frame(header_content, bg=self.colors['header_bg'])
         title_frame.pack(side=tk.LEFT)
 
-        tk.Label(title_frame, text="🦖", font=("Segoe UI Emoji", 24), bg=self.colors['header_bg'], fg="#f38ba8").pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(title_frame, text="🦕", font=("Segoe UI Emoji", 24), bg=self.colors['header_bg'], fg="#89dceb").pack(side=tk.LEFT, padx=(0, 10))
         self.title_label = tk.Label(title_frame, text=_("DinoCore Production Flasher"),
                                    font=("Segoe UI", 18, "bold"), bg=self.colors['header_bg'],
                                    fg=self.colors['text'])
