@@ -44,10 +44,15 @@ def main():
         print(f"⚠️  Could not check for updates: {e}")
         print("🚀 Starting application (update check skipped)...")
 
-    # Note: Application will be launched manually to avoid Firebase initialization conflicts
-    print("✅ Update process completed!")
-    print("🚀 Please run the application manually with: python gui_flasher.py")
-    print("   or use the start_gui.bat file")
+    # Launch the main application
+    try:
+        subprocess.run([
+            sys.executable, 'gui_flasher.py'
+        ], cwd=os.path.dirname(__file__))
+    except Exception as e:
+        print(f"❌ Error launching application: {e}")
+        print("You can try launching manually with: python gui_flasher.py")
+        input("Press Enter to exit...")
 
 if __name__ == "__main__":
     main()
