@@ -67,6 +67,28 @@ def play_sound(freq, duration):
     except Exception:
         pass
 
+def create_icon_from_emoji(emoji: str, color: str, size: int = 16) -> Optional[ImageTk.PhotoImage]:
+    """Creates a PhotoImage from an emoji character."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Create a blank image with transparency
+        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        
+        # Try to load a suitable font for emojis
+        try:
+            font = ImageFont.truetype("seguiemj.ttf", int(size * 0.8))
+        except IOError:
+            font = ImageFont.load_default()
+
+        # Draw the emoji centered on the image
+        draw.text((size/2, size/2), emoji, font=font, anchor="mm", fill=color)
+        
+        return ImageTk.PhotoImage(image)
+    except Exception:
+        return None
+
 # --- Business Logic ---
 def parse_version(version_string):
     try:
@@ -443,6 +465,18 @@ class FlasherApp:
         
         self.log_queue = queue.Queue()
         self.scanner_stop_event = threading.Event()
+        
+        # --- Create Icons ---
+        self.icons = {
+            'success': create_icon_from_emoji("✅", self.colors['success_btn']),
+            'error': create_icon_from_emoji("❌", self.colors['prod_btn']),
+            'warning': create_icon_from_emoji("⚠️", self.colors['warning_btn']),
+            'info': create_icon_from_emoji("ℹ️", self.colors['log_text']),
+            'bt': create_icon_from_emoji("🔵", self.colors['highlight']),
+            'firebase': create_icon_from_emoji("🔥", "#f5a97f"),
+            'flash': create_icon_from_emoji("⚡", "#f9e2af"),
+        }
+
         self.create_widgets()
         self.update_log()
         
@@ -639,16 +673,8 @@ class FlasherApp:
         for tab_name in ["USB/Serial", "Bluetooth", "Firebase"]:
             frame = tk.Frame(self.notebook, bg=self.colors['frame_bg'])
             self.notebook.add(frame, text=tab_name)
-            log_view = scrolledtext.ScrolledText(
-                frame, font=("Fira Code", 10) if self.is_font_available("Fira Code") else ("Consolas", 10),
-                bg=self.colors['log_bg'], fg=self.colors['log_text'],
-                insertbackground=self.colors['highlight'], selectbackground=self.colors['highlight'],
-                relief=tk.FLAT, borderwidth=0, padx=10, pady=5, wrap=tk.WORD, state=tk.DISABLED
-            )
+            log_view = LogViewer(frame, self.colors, self.icons)
             log_view.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            log_view.tag_config("success", foreground=self.colors['success_btn'])
-            log_view.tag_config("error", foreground=self.colors['prod_btn'])
-            log_view.tag_config("warning", foreground=self.colors['warning_btn'])
             self.log_views[tab_name] = log_view
 
         # Start connection monitoring
@@ -728,28 +754,23 @@ class FlasherApp:
                 tab_name = "Firebase"
 
             log_view = self.log_views[tab_name]
-            log_view.config(state=tk.NORMAL)
+            
+            # Determine icon
+            icon = self.icons['info']
+            if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str:
+                icon = self.icons['success']
+            elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str:
+                icon = self.icons['error']
+            elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str:
+                icon = self.icons['warning']
+            elif "Bluetooth" in message_str or "BLE" in message_str:
+                icon = self.icons['bt']
+            elif "Firebase" in message_str:
+                icon = self.icons['firebase']
+            elif "Flash" in message_str or "esptool" in message_str:
+                icon = self.icons['flash']
 
-            if isinstance(message, str) and message.startswith('\r'):
-                log_view.delete("end-2l", "end-1l")
-                log_view.insert("end-1l", message[1:])
-            elif isinstance(message, dict):
-                level = message.get('level', 'info')
-                text = message.get('message', str(message))
-                tags = ()
-                if level == 'error': tags = ("error",)
-                elif level == 'warning': tags = ("warning",)
-                elif level == 'success': tags = ("success",)
-                log_view.insert(tk.END, text + "\n", tags)
-            else:
-                tags = ()
-                if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str: tags = ("success",)
-                elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str: tags = ("error",)
-                elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str: tags = ("warning",)
-                log_view.insert(tk.END, message_str, tags)
-
-            log_view.see(tk.END)
-            log_view.config(state=tk.DISABLED)
+            log_view.add_log_entry(message_str, icon)
 
         self.root.after(100, self.update_log)
 
@@ -1388,6 +1409,51 @@ class VersionDialog:
     def cancel(self):
         self.version = ""
         self.top.destroy()
+
+class LogViewer(tk.Frame):
+    def __init__(self, parent, colors, icons, *args, **kwargs):
+        super().__init__(parent, bg=colors['log_bg'], *args, **kwargs)
+        self.colors = colors
+        self.icons = icons
+
+        self.canvas = tk.Canvas(self, bg=colors['log_bg'], highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.log_frame = tk.Frame(self.canvas, bg=colors['log_bg'])
+
+        self.log_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.log_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        self.log_frame.bind('<Enter>', self._bind_mouse)
+        self.log_frame.bind('<Leave>', self._unbind_mouse)
+
+    def _bind_mouse(self, event=None):
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _unbind_mouse(self, event=None):
+        self.canvas.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def add_log_entry(self, message, icon):
+        entry_frame = tk.Frame(self.log_frame, bg=self.colors['log_bg'])
+        entry_frame.pack(fill="x", pady=2)
+
+        icon_label = tk.Label(entry_frame, image=icon, bg=self.colors['log_bg'])
+        icon_label.pack(side="left", padx=(5, 10))
+
+        text_label = tk.Label(entry_frame, text=message.strip(), font=("Consolas", 10),
+                              bg=self.colors['log_bg'], fg=self.colors['log_text'],
+                              wraplength=self.winfo_width() - 50, justify="left")
+        text_label.pack(side="left", anchor="w")
+        
+        # Auto-scroll to the bottom
+        self.canvas.update_idletasks()
+        self.canvas.yview_moveto(1.0)
 
 if __name__ == "__main__":
     root = tk.Tk()
