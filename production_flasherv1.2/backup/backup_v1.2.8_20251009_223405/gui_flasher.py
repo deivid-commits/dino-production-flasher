@@ -17,7 +17,7 @@ import configparser
 import asyncio
 from tkinter import simpledialog
 import bleak
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 # Import internationalization system
 from i18n_utils import _, translation_manager
@@ -67,27 +67,77 @@ def play_sound(freq, duration):
     except Exception:
         pass
 
-def create_icon_from_emoji(emoji: str, color: str, size: int = 16) -> Optional[ImageTk.PhotoImage]:
-    """Creates a PhotoImage from an emoji character."""
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        
-        # Create a blank image with transparency
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        
-        # Try to load a suitable font for emojis
+class RichLogView(tk.Frame):
+    """A custom text widget that displays logs with icons."""
+    def __init__(self, parent, colors, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.colors = colors
+        self.icons = {}
+        self._create_icons()
+
+        self.text = tk.Text(
+            self,
+            font=("Segoe UI", 10),
+            bg=self.colors['log_bg'],
+            fg=self.colors['log_text'],
+            insertbackground=self.colors['highlight'],
+            selectbackground=self.colors['highlight'],
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=10,
+            pady=5,
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.scrollbar = tk.Scrollbar(self, command=self.text.yview)
+        self.text.config(yscrollcommand=self.scrollbar.set)
+
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Configure tags for text colors
+        self.text.tag_config("success", foreground=self.colors['success_btn'])
+        self.text.tag_config("error", foreground=self.colors['prod_btn'])
+        self.text.tag_config("warning", foreground=self.colors['warning_btn'])
+        self.text.tag_config("info", foreground=self.colors['log_text'])
+        self.text.tag_config("bluetooth", foreground="#89dceb") # Cyan
+        self.text.tag_config("firebase", foreground="#f9e2af") # Yellow
+
+    def _create_icons(self):
+        """Generate icons using Pillow to avoid external files."""
+        icon_data = {
+            'success': ('✅', '#a6e3a1'),
+            'error': ('❌', '#f38ba8'),
+            'warning': ('⚠️', '#f9e2af'),
+            'info': ('ℹ️', '#89b4fa'),
+            'bluetooth': ('🔵', '#89dceb'),
+            'firebase': ('🔥', '#fab387')
+        }
         try:
-            font = ImageFont.truetype("seguiemj.ttf", int(size * 0.8))
+            font = ImageFont.truetype("seguiemj.ttf", 18)
         except IOError:
             font = ImageFont.load_default()
 
-        # Draw the emoji centered on the image
-        draw.text((size/2, size/2), emoji, font=font, anchor="mm", fill=color)
+        for name, (emoji, color) in icon_data.items():
+            image = Image.new("RGBA", (24, 24), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(image)
+            draw.text((12, 12), emoji, font=font, anchor="mm", fill=color)
+            self.icons[name] = ImageTk.PhotoImage(image)
+
+    def log(self, message, level='info'):
+        """Add a log entry with an icon and styled text."""
+        self.text.config(state=tk.NORMAL)
         
-        return ImageTk.PhotoImage(image)
-    except Exception:
-        return None
+        # Insert icon
+        icon = self.icons.get(level)
+        if icon:
+            self.text.image_create(tk.END, image=icon, padx=5)
+
+        # Insert message with color tag
+        self.text.insert(tk.END, f" {message.strip()}\n", (level,))
+        
+        self.text.see(tk.END)
+        self.text.config(state=tk.DISABLED)
 
 # --- Business Logic ---
 def parse_version(version_string):
@@ -465,18 +515,6 @@ class FlasherApp:
         
         self.log_queue = queue.Queue()
         self.scanner_stop_event = threading.Event()
-        
-        # --- Create Icons ---
-        self.icons = {
-            'success': create_icon_from_emoji("✅", self.colors['success_btn']),
-            'error': create_icon_from_emoji("❌", self.colors['prod_btn']),
-            'warning': create_icon_from_emoji("⚠️", self.colors['warning_btn']),
-            'info': create_icon_from_emoji("ℹ️", self.colors['log_text']),
-            'bt': create_icon_from_emoji("🔵", self.colors['highlight']),
-            'firebase': create_icon_from_emoji("🔥", "#f5a97f"),
-            'flash': create_icon_from_emoji("⚡", "#f9e2af"),
-        }
-
         self.create_widgets()
         self.update_log()
         
@@ -541,16 +579,19 @@ class FlasherApp:
         tk.Label(title_frame, text="v1.2.0", font=("Segoe UI", 10), bg=self.colors['header_bg'],
                 fg=self.colors['log_text']).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Language cycle button
-        lang_names = {'en': 'EN', 'zh_CN': '简中', 'zh_TW': '繁中'}
-        current_lang = translation_manager.get_current_language()
-        self.language_button = tk.Button(header_content,
-                                        text=f"🌐 {lang_names.get(current_lang, 'EN')}",
-                                        font=("Segoe UI", 9, "bold"),
-                                        bg=self.colors['header_bg'], fg=self.colors['text'],
-                                        relief=tk.FLAT, borderwidth=0,
-                                        command=self.cycle_language)
-        self.language_button.pack(side=tk.RIGHT, padx=(10, 0))
+        # Language selection buttons
+        lang_frame = tk.Frame(header_content, bg=self.colors['header_bg'])
+        lang_frame.pack(side=tk.RIGHT, padx=(20, 0))
+
+        self.en_button = tk.Button(lang_frame, text="English", font=("Segoe UI", 10, "bold"),
+                                   bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.FLAT,
+                                   command=lambda: self.set_language('en'))
+        self.en_button.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.zh_button = tk.Button(lang_frame, text="中文", font=("Segoe UI", 10, "bold"),
+                                   bg=self.colors['frame_bg'], fg=self.colors['text'], relief=tk.FLAT,
+                                   command=lambda: self.set_language('zh_CN'))
+        self.zh_button.pack(side=tk.LEFT)
 
         # Connection status indicator
         self.connection_label = tk.Label(header_content, text=_("🔗 SERVER ONLINE"),
@@ -673,7 +714,7 @@ class FlasherApp:
         for tab_name in ["USB/Serial", "Bluetooth", "Firebase"]:
             frame = tk.Frame(self.notebook, bg=self.colors['frame_bg'])
             self.notebook.add(frame, text=tab_name)
-            log_view = LogViewer(frame, self.colors, self.icons)
+            log_view = RichLogView(frame, self.colors, bg=self.colors['log_bg'])
             log_view.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             self.log_views[tab_name] = log_view
 
@@ -747,30 +788,38 @@ class FlasherApp:
                             self.progress_visible = False
                     continue # Skip text logging for this message
             
-            message_str = str(message)
-            if "[BLE" in message_str or "Bluetooth" in message_str:
-                tab_name = "Bluetooth"
-            elif "Firebase" in message_str:
-                tab_name = "Firebase"
+            message_str = str(message).strip()
+            level = 'info' # Default level
 
+            # Determine level from message content
+            if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str:
+                level = 'success'
+            elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str:
+                level = 'error'
+            elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str:
+                level = 'warning'
+            elif "[BLE" in message_str or "Bluetooth" in message_str or "🔵" in message_str:
+                level = 'bluetooth'
+            elif "Firebase" in message_str or "🔥" in message_str:
+                level = 'firebase'
+
+            # Determine target tab
+            if level == 'bluetooth':
+                tab_name = "Bluetooth"
+            elif level == 'firebase':
+                tab_name = "Firebase"
+            
             log_view = self.log_views[tab_name]
             
-            # Determine icon
-            icon = self.icons['info']
-            if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str:
-                icon = self.icons['success']
-            elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str:
-                icon = self.icons['error']
-            elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str:
-                icon = self.icons['warning']
-            elif "Bluetooth" in message_str or "BLE" in message_str:
-                icon = self.icons['bt']
-            elif "Firebase" in message_str:
-                icon = self.icons['firebase']
-            elif "Flash" in message_str or "esptool" in message_str:
-                icon = self.icons['flash']
-
-            log_view.add_log_entry(message_str, icon)
+            # Handle special case for flashing progress
+            if message_str.startswith('\r'):
+                # This is a progress line, handle it without an icon for now
+                log_view.text.config(state=tk.NORMAL)
+                log_view.text.delete("end-2l", "end-1l")
+                log_view.text.insert("end-1l", message_str[1:])
+                log_view.text.config(state=tk.DISABLED)
+            else:
+                log_view.log(message_str, level)
 
         self.root.after(100, self.update_log)
 
@@ -846,28 +895,22 @@ class FlasherApp:
             
             time.sleep(2)
 
-    def cycle_language(self):
-        """Cycle through available languages: EN -> ZH_CN -> ZH_TW -> EN"""
-        current_lang = translation_manager.get_current_language()
-        languages = ['en', 'zh_CN', 'zh_TW']
-
-        try:
-            current_index = languages.index(current_lang)
-            next_index = (current_index + 1) % len(languages)
-        except ValueError:
-            next_index = 1  # Default to zh_CN if current not found
-
-        next_lang = languages[next_index]
-
-        if translation_manager.set_language(next_lang):
-            # Update button text
-            lang_names = {'en': 'EN', 'zh_CN': '简中', 'zh_TW': '繁中'}
-            self.language_button.config(text=f"🌐 {lang_names.get(next_lang, 'EN')}")
-
-            # Refresh all UI texts to new language
+    def set_language(self, lang_code):
+        """Set the application language and update UI."""
+        if translation_manager.set_language(lang_code):
             self.update_all_texts()
         else:
             messagebox.showerror(_("Error"), _("Failed to change language"))
+
+    def update_language_buttons(self):
+        """Update the visual state of language buttons."""
+        current_lang = translation_manager.get_current_language()
+        if current_lang == 'en':
+            self.en_button.config(relief=tk.SUNKEN, bg=self.colors['highlight'])
+            self.zh_button.config(relief=tk.FLAT, bg=self.colors['frame_bg'])
+        elif current_lang.startswith('zh'):
+            self.zh_button.config(relief=tk.SUNKEN, bg=self.colors['highlight'])
+            self.en_button.config(relief=tk.FLAT, bg=self.colors['frame_bg'])
 
     def check_for_updates(self):
         """Check for updates and show results in log"""
@@ -1351,16 +1394,31 @@ class FlasherApp:
         self.log_queue.put("=" * 50)
 
     def update_all_texts(self):
-        """Update all interface texts after language change"""
-        # Update window title
-        self.root.title(_(WINDOW_TITLE))
-
-        # Update title label
+        """Update all interface texts after language change."""
+        self.root.title(_("🦕 DinoCore Production Flasher v1.2.0"))
         self.title_label.config(text=_("DinoCore Production Flasher"))
+        self.connection_label.config(text=_("🔗 SERVER ONLINE")) # This will be updated by status check
+        
+        # Config Frame
+        self.notebook.tab(0, text=_("USB/Serial"))
+        self.notebook.tab(1, text=_("Bluetooth"))
+        self.notebook.tab(2, text=_("Firebase"))
 
-        # Refresh interface - will be handled by the translation system
-        # Since we use _() calls, they will automatically get new translations
-        # The next time the interface is redrawn, it will show the new language
+        # Buttons and Labels
+        if DinoUpdater is not None:
+            self.update_button.config(text=_("🔄 Check Updates"))
+        self.prod_button.config(text=_("🏭 Flash Production"))
+        self.test_button.config(text=_("🧪 Flash Testing & eFuse"))
+        self.bt_select_button.config(text=_("📡 Scan & Test Device"))
+        self.bt_qc_button.config(text=_("▶️ Run QC (After Flash)"))
+
+        # Update status label text if it's in a default state
+        current_status = self.status_label.cget("text")
+        if "Connect ESP32 Device" in current_status or "连接ESP32设备" in current_status:
+             self.status_label.config(text="🔌 " + _("Connect ESP32 Device"))
+        
+        # Update language button states
+        self.update_language_buttons()
 
 
 
@@ -1409,51 +1467,6 @@ class VersionDialog:
     def cancel(self):
         self.version = ""
         self.top.destroy()
-
-class LogViewer(tk.Frame):
-    def __init__(self, parent, colors, icons, *args, **kwargs):
-        super().__init__(parent, bg=colors['log_bg'], *args, **kwargs)
-        self.colors = colors
-        self.icons = icons
-
-        self.canvas = tk.Canvas(self, bg=colors['log_bg'], highlightthickness=0)
-        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.log_frame = tk.Frame(self.canvas, bg=colors['log_bg'])
-
-        self.log_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0, 0), window=self.log_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
-        
-        self.log_frame.bind('<Enter>', self._bind_mouse)
-        self.log_frame.bind('<Leave>', self._unbind_mouse)
-
-    def _bind_mouse(self, event=None):
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
-    def _unbind_mouse(self, event=None):
-        self.canvas.unbind_all("<MouseWheel>")
-
-    def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-    def add_log_entry(self, message, icon):
-        entry_frame = tk.Frame(self.log_frame, bg=self.colors['log_bg'])
-        entry_frame.pack(fill="x", pady=2)
-
-        icon_label = tk.Label(entry_frame, image=icon, bg=self.colors['log_bg'])
-        icon_label.pack(side="left", padx=(5, 10))
-
-        text_label = tk.Label(entry_frame, text=message.strip(), font=("Consolas", 10),
-                              bg=self.colors['log_bg'], fg=self.colors['log_text'],
-                              wraplength=self.winfo_width() - 50, justify="left")
-        text_label.pack(side="left", anchor="w")
-        
-        # Auto-scroll to the bottom
-        self.canvas.update_idletasks()
-        self.canvas.yview_moveto(1.0)
 
 if __name__ == "__main__":
     root = tk.Tk()
