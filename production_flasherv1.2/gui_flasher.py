@@ -6,6 +6,7 @@ import requests
 import winsound
 import threading
 import queue
+import logging
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
 from serial.tools.list_ports import comports
@@ -14,6 +15,9 @@ import traceback
 import serial
 import configparser
 import asyncio
+from tkinter import simpledialog
+import bleak
+from PIL import Image, ImageTk
 
 # Import internationalization system
 from i18n_utils import _, translation_manager
@@ -33,7 +37,7 @@ except ImportError:
 
 # Firebase database integration (optional)
 try:
-    from firebase_db import get_firebase_db, store_qc_results, store_flash_log
+    from firebase_db import get_firebase_db, store_qc_results, store_flash_log, store_session_log, init_firebase_with_credentials
     FIREBASE_AVAILABLE = True
 except ImportError:
     FIREBASE_AVAILABLE = False
@@ -55,28 +59,6 @@ END_FREQ = 1200
 END_DUR = 400
 ERROR_FREQ = 400
 ERROR_DUR = 800
-
-# --- Config Manager ---
-class ConfigManager:
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.config = configparser.ConfigParser()
-        if not os.path.exists(self.file_path):
-            self.create_default_config()
-        self.config.read(self.file_path)
-
-    def create_default_config(self):
-        self.config['DEFAULT'] = {'TARGET_HW_VERSION': '1.9.1'}
-        with open(self.file_path, 'w') as configfile:
-            self.config.write(configfile)
-
-    def get_hw_version(self):
-        return self.config.get('DEFAULT', 'TARGET_HW_VERSION', fallback='1.9.0')
-
-    def save_hw_version(self, version):
-        self.config['DEFAULT']['TARGET_HW_VERSION'] = version
-        with open(self.file_path, 'w') as configfile:
-            self.config.write(configfile)
 
 # --- Helper Functions ---
 def play_sound(freq, duration):
@@ -211,8 +193,19 @@ def flash_device(log_queue, port, mode, hardware_version):
     try:
         process = subprocess.Popen(flash_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, bufsize=1)
         is_flashing_main_app = False
+        last_progress_line = ""
         for line in iter(process.stdout.readline, ''):
-            log_queue.put(line)
+            if "Writing at" in line and "%" in line:
+                # Clean up progress line
+                progress_match = re.search(r'(\d+\.\d+)%', line)
+                if progress_match:
+                    clean_line = f"\rFlashing... {progress_match.group(0)}"
+                    if clean_line != last_progress_line:
+                        log_queue.put(clean_line)
+                        last_progress_line = clean_line
+            else:
+                log_queue.put(line)
+
             if "Writing at 0x00260000" in line:
                 is_flashing_main_app = True
             if is_flashing_main_app:
@@ -240,17 +233,38 @@ def flash_device(log_queue, port, mode, hardware_version):
         log_queue.put(('hide_progress',))
         log_queue.put(f"-- Finished flashing {port} --")
 
-def serial_monitor_thread(log_queue, port, stop_event):
+def serial_monitor_thread(log_queue, port, stop_event, app_instance):
     try:
         ser = serial.Serial(port, MONITOR_BAUD, timeout=1)
         log_queue.put(f"--- Serial monitor started for {port} ---")
+        mac_address = None
+        device_name = None
         while not stop_event.is_set():
             try:
                 if ser.in_waiting > 0:
-                    line = ser.readline()
-                    log_queue.put(line.decode('utf-8', errors='replace'))
+                    line_bytes = ser.readline()
+                    line = line_bytes.decode('utf-8', errors='replace')
+                    log_queue.put(line)
+
+                    # Capture MAC and Name
+                    if "Bluetooth MAC:" in line:
+                        mac_match = re.search(r'Bluetooth MAC: ([\w:]+)', line)
+                        if mac_match:
+                            mac_address = mac_match.group(1).strip().upper()
+                            log_queue.put(f"📱 Captured Bluetooth MAC: {mac_address}")
+                    
+                    if "Setting device name to:" in line:
+                        name_match = re.search(r'Setting device name to: ([\w-]+)', line)
+                        if name_match:
+                            device_name = name_match.group(1).strip()
+                            log_queue.put(f"📱 Captured Bluetooth Name: {device_name}")
+
+                    if "The device is now discoverable and ready for connection!" in line:
+                        if mac_address and device_name:
+                            app_instance.set_captured_ble_details(mac_address, device_name)
+                            mac_address, device_name = None, None # Reset
                 else:
-                    time.sleep(0.05) # Avoid busy-waiting
+                    time.sleep(0.05)
                     if not any(p.device == port for p in comports()):
                         log_queue.put(f"\n--- Device {port} disconnected. Closing monitor. ---")
                         break
@@ -262,7 +276,29 @@ def serial_monitor_thread(log_queue, port, stop_event):
     except Exception as e:
         log_queue.put(f"\n[X] Error opening serial monitor on {port}: {e}")
 
-def process_device_thread(log_queue, port, mode, stop_event, target_hw_version):
+def get_esp32_port(log_queue):
+    """Scans COM ports and identifies the one connected to an ESP32 using VID/PID."""
+    esp32_ports = [p for p in comports() if "303A:1001" in p.hwid]
+
+    if not esp32_ports:
+        return None, "NO_ESP32_FOUND"
+    
+    if len(esp32_ports) > 1:
+        return None, "MULTIPLE_ESP32_FOUND"
+
+    port = esp32_ports[0].device
+    return port, "ESP32_FOUND"
+
+def process_device_thread(log_queue, port, mode, stop_event, target_hw_version, app_instance):
+    start_time = time.time()
+    device_info = {'port': port, 'serial_number': 'unknown'}
+    flash_result = {
+        'success': False,
+        'mode': mode,
+        'hardware_version': target_hw_version,
+        'error': ''
+    }
+
     try:
         log_queue.put(f"--- Processing new device on {port} ---")
         flash_hw_version = None
@@ -309,19 +345,30 @@ def process_device_thread(log_queue, port, mode, stop_event, target_hw_version):
             flash_ok = flash_device(log_queue, port, mode, flash_hw_version)
             if flash_ok:
                 log_queue.put(_("Flash completed successfully. Starting serial monitor..."))
-                serial_monitor_thread(log_queue, port, stop_event)
+                flash_result['success'] = True
+                serial_monitor_thread(log_queue, port, stop_event, app_instance)
             else:
                 log_queue.put(_("[X] Flash failed. Unable to complete device programming."))
+                flash_result['error'] = "Flash process failed"
                 play_sound(ERROR_FREQ, ERROR_DUR)
         else:
             log_queue.put(_("[X] No valid hardware version found. Cannot proceed with flash."))
+            flash_result['error'] = "No valid hardware version found"
             play_sound(ERROR_FREQ, ERROR_DUR)
 
     except Exception as e:
+        flash_result['error'] = str(e)
         log_queue.put("!!!!!!!!!! UNEXPECTED ERROR in device processing thread !!!!!!!!!!!")
         log_queue.put(f"ERROR: {e}")
         log_queue.put(traceback.format_exc() + "\n")
         play_sound(ERROR_FREQ, ERROR_DUR)
+    finally:
+        flash_result['duration'] = time.time() - start_time
+        if FIREBASE_AVAILABLE:
+            store_flash_log(device_info, flash_result)
+            # Also store the full session log
+            if app_instance.session_logs:
+                store_session_log(app_instance.session_logs)
 
 class FlasherApp:
     def __init__(self, root):
@@ -358,13 +405,60 @@ class FlasherApp:
         self.root.attributes('-topmost', True)  # Always on top for better UX
         self.root.after(100, lambda: self.root.attributes('-topmost', False))
         
-        self.config_manager = ConfigManager(CONFIG_FILE)
-        self.hw_version_var = tk.StringVar(value=self.config_manager.get_hw_version())
+        # --- File Logger Setup ---
+        self.log_file = "session.log"
+        # Clear log file on start, ensuring it's UTF-8
+        with open(self.log_file, "w", encoding="utf-8") as f:
+            f.write(f"--- Session Log Started: {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n\n")
+        
+        self.hw_version_var = tk.StringVar()
+        self.captured_ble_name = None
+        self.captured_mac = None
+        self.session_logs = []
+        self.ble_ready_event = threading.Event()
         
         self.log_queue = queue.Queue()
         self.scanner_stop_event = threading.Event()
         self.create_widgets()
         self.update_log()
+        
+        # Initialize Firebase
+        if FIREBASE_AVAILABLE:
+            init_thread = threading.Thread(target=self.initialize_firebase, daemon=True)
+            init_thread.start()
+
+        self.root.after(200, self.ask_hardware_version)
+
+    def set_captured_ble_details(self, mac, name):
+        self.captured_mac = mac
+        self.captured_ble_name = name
+        self.ble_ready_event.set() # Signal that BLE is ready
+        self.bt_qc_button.config(state='normal')
+        self.status_label.config(text="🔵 " + _("Ready for Bluetooth QC"), bg=self.colors['highlight'])
+
+    def ask_hardware_version(self):
+        dialog = VersionDialog(self.root, self.colors)
+        self.root.wait_window(dialog.top)
+        version = dialog.version
+
+        if version and parse_version(version):
+            self.hw_version_var.set(version)
+            self.log_queue.put(f"🎯 Using hardware version for this session: {version}")
+            self.scanner_stop_event.clear()
+            detector_thread = threading.Thread(target=self.device_detector_worker, daemon=True)
+            detector_thread.start()
+        elif version is None: # User cancelled
+            self.root.destroy()
+        else: # Invalid format
+            messagebox.showerror(_("Invalid Version"), _("Invalid version format. The application will now close."))
+            self.root.destroy()
+
+    def initialize_firebase(self):
+        self.log_queue.put(("Firebase", "Attempting to initialize Firebase..."))
+        if init_firebase_with_credentials():
+            self.log_queue.put(("Firebase", "✅ Firebase connection successful."))
+        else:
+            self.log_queue.put(("Firebase", "⚠️ Firebase connection failed. Logs will not be saved."))
 
     def create_widgets(self):
         # Modern header with gradient and branding
@@ -380,7 +474,7 @@ class FlasherApp:
         title_frame = tk.Frame(header_content, bg=self.colors['header_bg'])
         title_frame.pack(side=tk.LEFT)
 
-        tk.Label(title_frame, text="🦕", font=("Segoe UI Emoji", 24), bg=self.colors['header_bg'], fg="#f38ba8").pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(title_frame, text="🦖", font=("Segoe UI Emoji", 24), bg=self.colors['header_bg'], fg="#f38ba8").pack(side=tk.LEFT, padx=(0, 10))
         self.title_label = tk.Label(title_frame, text=_("DinoCore Production Flasher"),
                                    font=("Segoe UI", 18, "bold"), bg=self.colors['header_bg'],
                                    fg=self.colors['text'])
@@ -424,13 +518,9 @@ class FlasherApp:
         self.version_entry = tk.Entry(config_inner, textvariable=self.hw_version_var,
                                      font=("Consolas", 12), width=15, bg=self.colors['entry_bg'],
                                      fg=self.colors['entry_fg'], insertbackground=self.colors['text'],
-                                     relief=tk.FLAT, borderwidth=1)
+                                     relief=tk.FLAT, borderwidth=1, state='readonly')
         self.version_entry.pack(side=tk.LEFT, padx=(15, 10))
-        self.save_button = tk.Button(config_inner, text=_("💾 Save Version"), font=("Segoe UI", 10, "bold"),
-                                    bg=self.colors['success_btn'], fg=self.colors['bg'],
-                                    command=self.save_hw_version, relief=tk.FLAT, padx=15)
-        self.save_button.pack(side=tk.LEFT, padx=(0, 10))
-
+        
         # Update button (only if updater is available)
         if DinoUpdater is not None:
             self.update_button = tk.Button(config_inner, text=_("🔄 Check Updates"), font=("Segoe UI", 10, "bold"),
@@ -452,7 +542,7 @@ class FlasherApp:
         status_inner.pack(fill=tk.X, padx=15, pady=10)
 
         # Status display
-        self.status_label = tk.Label(status_inner, text=_("▶️  SELECT A MODE"), font=("Segoe UI", 16, "bold"),
+        self.status_label = tk.Label(status_inner, text="🔌 " + _("Connect ESP32 Device"), font=("Segoe UI", 16, "bold"),
                                     bg=self.colors['status_idle'], fg="white", pady=8, padx=15,
                                     relief=tk.FLAT)
         self.status_label.pack(fill=tk.X, pady=(0, 10))
@@ -483,62 +573,67 @@ class FlasherApp:
         top_row = tk.Frame(button_container, bg=self.colors['frame_bg'])
         top_row.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-        self.prod_button = tk.Button(top_row, text=_("🏭 PRODUCTION MODE"),
+        self.prod_button = tk.Button(top_row, text=_("🏭 Flash Production"),
                                     bg=self.colors['prod_btn'], fg=self.colors['bg'],
-                                    command=self.select_mode_production, **button_config)
+                                    command=lambda: self.start_flashing('production'), state='disabled', **button_config)
         self.prod_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        self.test_button = tk.Button(top_row, text=_("🧪 TESTING MODE"),
+        self.test_button = tk.Button(top_row, text=_("🧪 Flash Testing"),
                                     bg=self.colors['test_btn'], fg=self.colors['bg'],
-                                    command=self.select_mode_testing, **button_config)
+                                    command=lambda: self.start_flashing('testing'), state='disabled', **button_config)
         self.test_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        # Bottom row (Bluetooth QC and Stop)
+        # Bottom row (Manual BT Select and QC)
         bottom_row = tk.Frame(button_container, bg=self.colors['frame_bg'])
         bottom_row.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
 
-        # Bluetooth QC button (only if available)
         if BT_QC_AVAILABLE and BLEAK_AVAILABLE:
+            self.bt_select_button = tk.Button(bottom_row, text=_("📡 Select BT Device"),
+                                            bg='#f9e2af', fg=self.colors['bg'], # Yellow
+                                            command=self.start_manual_bt_selection, state='normal', **button_config)
+            self.bt_select_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+
             self.bt_qc_button = tk.Button(bottom_row, text=_("🔵 BLUETOOTH QC"),
                                         bg='#7b68ee', fg=self.colors['bg'],  # Medium slate blue
-                                        command=self.start_bluetooth_qc, **button_config)
-            self.bt_qc_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+                                        command=self.start_bluetooth_qc, state='disabled', **button_config)
+            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
         else:
-            # Show disabled button if Bluetooth not available
-            self.bt_qc_button = tk.Button(bottom_row, text=_("⚠️  BT UNAVAILABLE"),
-                                        bg='#6c7086', fg=self.colors['bg'],  # Disabled gray
-                                        command=self.bt_not_available, state='disabled', **button_config)
-            self.bt_qc_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-
-        self.stop_button = tk.Button(bottom_row, text=_("⏹️  STOP & CHANGE MODE"),
-                                    bg=self.colors['stop_btn'], fg=self.colors['bg'],
-                                    command=self.stop_scanner, **button_config)
-        self.stop_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+            # Show disabled buttons if Bluetooth not available
+            self.bt_select_button = tk.Button(bottom_row, text=_("📡 BT UNAVAILABLE"),
+                                        bg='#6c7086', fg=self.colors['bg'],
+                                        state='disabled', **button_config)
+            self.bt_select_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+            
+            self.bt_qc_button = tk.Button(bottom_row, text=_("🔵 BT UNAVAILABLE"),
+                                        bg='#6c7086', fg=self.colors['bg'],
+                                        state='disabled', **button_config)
+            self.bt_qc_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
         self.show_mode_buttons()
 
-        # Enhanced log section
-        log_frame = tk.LabelFrame(content_frame, text=f" 📋 {_('Activity Log')} ", font=("Segoe UI", 11, "bold"),
-                                 bg=self.colors['frame_bg'], fg=self.colors['text'],
-                                 relief=tk.GROOVE, borderwidth=2)
-        log_frame.pack(fill=tk.BOTH, expand=True)
+        # Log Tabs
+        style = ttk.Style()
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"), padding=[10, 5])
+        style.configure("TNotebook", background=self.colors['bg'], borderwidth=0)
+        
+        self.notebook = ttk.Notebook(content_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
 
-        log_inner = tk.Frame(log_frame, bg=self.colors['frame_bg'])
-        log_inner.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
-
-        # Enhanced log with syntax highlighting colors
-        self.log_view = scrolledtext.ScrolledText(
-            log_inner, font=("Fira Code", 10) if self.is_font_available("Fira Code") else ("Consolas", 10),
-            bg=self.colors['log_bg'], fg=self.colors['log_text'],
-            insertbackground=self.colors['highlight'], selectbackground=self.colors['highlight'],
-            relief=tk.FLAT, borderwidth=0, padx=10, pady=5, wrap=tk.WORD, state=tk.DISABLED
-        )
-        self.log_view.pack(fill=tk.BOTH, expand=True)
-
-        # Configure color-coded text tags
-        self.log_view.tag_config("success", foreground=self.colors['success_btn'])
-        self.log_view.tag_config("error", foreground=self.colors['prod_btn'])
-        self.log_view.tag_config("warning", foreground=self.colors['warning_btn'])
+        self.log_views = {}
+        for tab_name in ["USB/Serial", "Bluetooth", "Firebase"]:
+            frame = tk.Frame(self.notebook, bg=self.colors['frame_bg'])
+            self.notebook.add(frame, text=tab_name)
+            log_view = scrolledtext.ScrolledText(
+                frame, font=("Fira Code", 10) if self.is_font_available("Fira Code") else ("Consolas", 10),
+                bg=self.colors['log_bg'], fg=self.colors['log_text'],
+                insertbackground=self.colors['highlight'], selectbackground=self.colors['highlight'],
+                relief=tk.FLAT, borderwidth=0, padx=10, pady=5, wrap=tk.WORD, state=tk.DISABLED
+            )
+            log_view.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            log_view.tag_config("success", foreground=self.colors['success_btn'])
+            log_view.tag_config("error", foreground=self.colors['prod_btn'])
+            log_view.tag_config("warning", foreground=self.colors['warning_btn'])
+            self.log_views[tab_name] = log_view
 
         # Start connection monitoring
         self.update_connection_status()
@@ -567,141 +662,152 @@ class FlasherApp:
         # Update every 30 seconds
         self.root.after(30000, self.update_connection_status)
 
-    def save_hw_version(self):
-        new_version = self.hw_version_var.get()
-        if parse_version(new_version):
-            self.config_manager.save_hw_version(new_version)
-            messagebox.showinfo(_("Success"), _("Hardware version saved: {version}").format(version=new_version))
-        else:
-            messagebox.showerror(_("Error"), _("Invalid version format. Please use format X.Y.Z (e.g., 1.9.1)"))
-
     def show_mode_buttons(self):
-        # Hide stop button and show main buttons
-        self.stop_button.pack_forget()
-
-        # Ensure bottom row is properly arranged (Bluetooth QC at left, Stop at right)
-        self.bt_qc_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        self.stop_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-
-        self.prod_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        self.test_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        self.version_entry.config(state='normal')
-        self.save_button.config(state='normal')
-
+        # This function is now simplified as buttons are always visible
+        pass
 
     def show_stop_button(self):
-        self.prod_button.pack_forget()
-        self.test_button.pack_forget()
-        self.bt_qc_button.pack_forget()  # Also hide Bluetooth QC button
-
-        # Show only the Stop button taking full width
-        self.stop_button.pack(fill=tk.BOTH, expand=True)
-        self.version_entry.config(state='disabled')
-        self.save_button.config(state='disabled')
+        # This function is no longer needed
+        pass
 
     def update_log(self):
         while not self.log_queue.empty():
-            message = self.log_queue.get_nowait()
-            if isinstance(message, tuple):
-                if message[0] == 'progress':
-                    self.progress_bar['value'] = message[1]
-                elif message[0] == 'show_progress':
-                    if not self.progress_visible:
-                        self.progress_bar.pack(in_=self.status_frame, fill=tk.X, pady=5, before=self.button_frame)
-                        self.progress_visible = True
-                elif message[0] == 'hide_progress':
-                    if self.progress_visible:
-                        self.progress_bar.pack_forget()
-                        self.progress_visible = False
+            message_info = self.log_queue.get_nowait()
+            
+            # --- Write to file log ---
+            try:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(str(message_info).strip() + "\n")
+            except Exception as e:
+                print(f"Failed to write to log file: {e}") # Fallback to console
+            
+            # Store raw message for Firebase logging
+            self.session_logs.append(str(message_info))
+
+            # Determine target tab and message content
+            tab_name = "USB/Serial" # Default tab
+            message = message_info
+
+            if isinstance(message_info, tuple):
+                if message_info[0] in self.log_views:
+                    tab_name, message = message_info
+                # This handles progress bar updates without trying to log them as text
+                elif message_info[0] in ['progress', 'show_progress', 'hide_progress']:
+                    if message_info[0] == 'progress':
+                        self.progress_bar['value'] = message_info[1]
+                    elif message_info[0] == 'show_progress':
+                        if not self.progress_visible:
+                            self.progress_bar.pack(in_=self.status_frame, fill=tk.X, pady=5, before=self.button_frame)
+                            self.progress_visible = True
+                    elif message_info[0] == 'hide_progress':
+                        if self.progress_visible:
+                            self.progress_bar.pack_forget()
+                            self.progress_visible = False
+                    continue # Skip text logging for this message
+            
+            message_str = str(message)
+            if "[BLE" in message_str or "Bluetooth" in message_str:
+                tab_name = "Bluetooth"
+            elif "Firebase" in message_str:
+                tab_name = "Firebase"
+
+            log_view = self.log_views[tab_name]
+            log_view.config(state=tk.NORMAL)
+
+            if isinstance(message, str) and message.startswith('\r'):
+                log_view.delete("end-2l", "end-1l")
+                log_view.insert("end-1l", message[1:])
             elif isinstance(message, dict):
-                # Handle Bluetooth QC log messages (dict format)
                 level = message.get('level', 'info')
                 text = message.get('message', str(message))
-                self.log_view.config(state=tk.NORMAL)
-                if level == 'error':
-                    self.log_view.insert(tk.END, text, "error")
-                elif level == 'warning':
-                    self.log_view.insert(tk.END, text, "warning")
-                elif level == 'success':
-                    self.log_view.insert(tk.END, text, "success")
-                else:
-                    self.log_view.insert(tk.END, text)
-                self.log_view.insert(tk.END, "\n")
-                self.log_view.see(tk.END)
-                self.log_view.config(state=tk.DISABLED)
+                tags = ()
+                if level == 'error': tags = ("error",)
+                elif level == 'warning': tags = ("warning",)
+                elif level == 'success': tags = ("success",)
+                log_view.insert(tk.END, text + "\n", tags)
             else:
-                # Handle regular string messages
-                self.log_view.config(state=tk.NORMAL)
-                # Color-code different types of log messages
-                if "[OK]" in message or "✅" in message or "[SUCCESS]" in message:
-                    self.log_view.insert(tk.END, message[:-1], "success")  # Remove newline for tag
-                    self.log_view.insert(tk.END, "\n")  # Add newline after tag
-                elif "[X]" in message or "❌" in message or "[ERROR]" in message or "[FAILED]" in message:
-                    self.log_view.insert(tk.END, message[:-1], "error")  # Remove newline for tag
-                    self.log_view.insert(tk.END, "\n")  # Add newline after tag
-                elif "[!]" in message or "⚠️" in message or "[WARNING]" in message:
-                    self.log_view.insert(tk.END, message[:-1], "warning")  # Remove newline for tag
-                    self.log_view.insert(tk.END, "\n")  # Add newline after tag
-                else:
-                    self.log_view.insert(tk.END, message)
+                tags = ()
+                if "[OK]" in message_str or "✅" in message_str or "[SUCCESS]" in message_str: tags = ("success",)
+                elif "[X]" in message_str or "❌" in message_str or "[ERROR]" in message_str or "[FAILED]" in message_str: tags = ("error",)
+                elif "[!]" in message_str or "⚠️" in message_str or "[WARNING]" in message_str: tags = ("warning",)
+                log_view.insert(tk.END, message_str, tags)
 
-                self.log_view.see(tk.END)
-                self.log_view.config(state=tk.DISABLED)
+            log_view.see(tk.END)
+            log_view.config(state=tk.DISABLED)
 
         self.root.after(100, self.update_log)
 
-    def select_mode_production(self):
-        if messagebox.askokcancel(_("Warning"), _("Production mode will NOT burn eFuses and requires devices to be tested first. Continue?")):
-            self.start_scanner("production")
+    def start_flashing(self, operation):
+        if not self.esp32_port:
+            messagebox.showerror(_("Error"), _("No ESP32 device detected."))
+            return
 
-    def select_mode_testing(self):
-        if messagebox.askokcancel(_("Notice"), _("Testing mode will attempt to burn HW version {version} to eFuses. This is irreversible. Continue?").format(version=self.hw_version_var.get())):
-            self.start_scanner("testing")
+        # Reset captured details on new flash operation
+        self.captured_mac = None
+        self.captured_ble_name = None
+        self.bt_qc_button.config(state='disabled')
 
-    def start_scanner(self, mode):
-        self.show_stop_button()
-        if mode == 'production':
-            self.status_label.config(text=_("ACTIVE MODE: PRODUCTION"), bg=self.colors['status_prod'])
-        else:
-            self.status_label.config(text=_("ACTIVE MODE: TESTING"), bg=self.colors['status_test'])
-        self.scanner_stop_event.clear()
-        self.log_queue.put(f"--- {mode.upper()} MODE ACTIVATED ---")
-        scanner_thread = threading.Thread(target=self.scanner_worker, args=(mode,), daemon=True)
-        scanner_thread.start()
+        if operation == 'production':
+            if not messagebox.askokcancel(_("Confirm"), _("Ready to flash PRODUCTION firmware to {port}?").format(port=self.esp32_port)):
+                return
+            self.status_label.config(text="🏭 " + _("Flashing Production..."), bg=self.colors['status_prod'])
+        else: # testing
+            if not messagebox.askokcancel(_("Confirm"), _("Ready to flash TESTING firmware and burn eFuse on {port}? This is irreversible.").format(port=self.esp32_port)):
+                return
+            self.status_label.config(text="🧪 " + _("Flashing Testing..."), bg=self.colors['status_test'])
+        
+        self.scanner_stop_event.set() # Stop the detector thread
+        
+        target_hw_version = self.hw_version_var.get()
+        # Pass 'self' to process_device_thread
+        flash_thread = threading.Thread(target=process_device_thread, args=(self.log_queue, self.esp32_port, operation, threading.Event(), target_hw_version, self), daemon=True)
+        flash_thread.start()
 
-    def stop_scanner(self):
-        self.scanner_stop_event.set()
-        self.log_queue.put(f"\n--- {_('SCANNING STOPPED')} ---")
-        self.log_queue.put(_("Please select a new mode."))
-        self.status_label.config(text=_("▶️  SELECT A MODE"), bg=self.colors['status_idle'])
-        self.show_mode_buttons()
+        # Disable buttons during flash
+        self.prod_button.config(state='disabled')
+        self.test_button.config(state='disabled')
+        self.bt_qc_button.config(state='disabled')
 
-    def scanner_worker(self, mode):
-        known_ports = {p.device for p in comports()}
-        self.log_queue.put(f"{_('Ignoring existing ports:')} {', '.join(known_ports) or 'None'}")
-        self.log_queue.put(_("Waiting for new devices..."))
-        target_hw_version = self.hw_version_var.get() # Get version at the start of scanning
-        self.log_queue.put(f"{_('Using Target HW Version:')} {target_hw_version}")
+        # Monitor thread to re-enable buttons
+        def monitor_flash_thread():
+            flash_thread.join()
+            self.scanner_stop_event.clear()
+            detector_thread = threading.Thread(target=self.device_detector_worker, daemon=True)
+            detector_thread.start()
+
+        monitor_thread = threading.Thread(target=monitor_flash_thread, daemon=True)
+        monitor_thread.start()
+
+    def device_detector_worker(self):
+        self.esp32_port = None
+        last_status = None
 
         while not self.scanner_stop_event.is_set():
-            try:
-                current_ports = {p.device for p in comports()}
-                new_ports = current_ports - known_ports
-                if new_ports:
-                    port_to_flash = new_ports.pop()
-                    known_ports.add(port_to_flash)
-                    process_thread = threading.Thread(target=process_device_thread, args=(self.log_queue, port_to_flash, mode, self.scanner_stop_event, target_hw_version), daemon=True)
-                    process_thread.start()
+            port, status = get_esp32_port(self.log_queue)
 
-                disconnected_ports = known_ports - current_ports
-                if disconnected_ports:
-                    known_ports.difference_update(disconnected_ports)
-                    self.log_queue.put(f"{_('Ports disconnected:')} {', '.join(disconnected_ports)}")
-
-                time.sleep(2)
-            except Exception as e:
-                self.log_queue.put(f"[X] {_('Error in scanner thread:')} {e}")
-                time.sleep(5)
+            if status != last_status:
+                if status == "ESP32_FOUND":
+                    self.esp32_port = port
+                    self.log_queue.put(f"✅ ESP32 detected on port {port}")
+                    self.status_label.config(text="✅ " + _("ESP32 Ready on {}").format(port), bg=self.colors['status_success'])
+                    self.prod_button.config(state='normal')
+                    self.test_button.config(state='normal')
+                    self.bt_qc_button.config(state='normal')
+                elif status == "NO_ESP32_FOUND":
+                    self.esp32_port = None
+                    self.status_label.config(text="🔌 " + _("Connect ESP32 Device"), bg=self.colors['status_idle'])
+                    self.prod_button.config(state='disabled')
+                    self.test_button.config(state='disabled')
+                    self.bt_qc_button.config(state='disabled')
+                elif status == "MULTIPLE_ESP32_FOUND":
+                    self.esp32_port = None
+                    self.status_label.config(text="⚠️ " + _("Multiple ESP32s Detected"), bg=self.colors['status_warning'])
+                    self.prod_button.config(state='disabled')
+                    self.test_button.config(state='disabled')
+                    self.bt_qc_button.config(state='disabled')
+                last_status = status
+            
+            time.sleep(2)
 
     def cycle_language(self):
         """Cycle through available languages: EN -> ZH_CN -> ZH_TW -> EN"""
@@ -816,21 +922,22 @@ class FlasherApp:
 
     def start_bluetooth_qc_mode(self):
         """Initialize and start Bluetooth QC testing"""
-        # Update status
-        self.status_label.config(text=_("🔵 BLUETOOTH QC ACTIVE"), bg='#7b68ee')
+        self.status_label.config(text="🔵 " + _("Bluetooth QC Active..."), bg='#7b68ee')
+        
+        # Disable buttons during QC
+        self.prod_button.config(state='disabled')
+        self.test_button.config(state='disabled')
+        self.bt_qc_button.config(state='disabled')
 
-        # Change button to stop
-        self.bt_qc_button.config(text=_("⏹️  STOP QC"), bg=self.colors['stop_btn'],
-                                command=self.stop_bluetooth_qc)
-
-        # Start Bluetooth QC in background thread
-        self.bt_qc_stop_event = threading.Event()
-
-        def bt_qc_thread():
+        def bt_qc_thread_wrapper():
             asyncio.run(self.run_bluetooth_qc())
+            # Re-enable detector worker when done
+            self.scanner_stop_event.clear()
+            detector_thread = threading.Thread(target=self.device_detector_worker, daemon=True)
+            detector_thread.start()
 
-        bt_qc_thread = threading.Thread(target=bt_qc_thread, daemon=True)
-        bt_qc_thread.start()
+        bt_thread = threading.Thread(target=bt_qc_thread_wrapper, daemon=True)
+        bt_thread.start()
 
     def stop_bluetooth_qc(self):
         """Stop Bluetooth QC testing"""
@@ -842,40 +949,110 @@ class FlasherApp:
         self.bt_qc_button.config(text=_("🔵 BLUETOOTH QC"), bg='#7b68ee',
                                 command=self.start_bluetooth_qc)
 
+    def start_manual_bt_selection(self):
+        """Wrapper to run the async device selection process."""
+        self.log_queue.put("Starting manual Bluetooth device selection...")
+        
+        def selection_thread_wrapper():
+            asyncio.run(self.manual_bt_selection_async())
+
+        selection_thread = threading.Thread(target=selection_thread_wrapper, daemon=True)
+        selection_thread.start()
+
+    async def manual_bt_selection_async(self):
+        """Async function to scan and select a BT device."""
+        try:
+            bt_qc_tester = get_bluetooth_qc_tester()
+            bt_qc_tester.set_log_queue(self.log_queue)
+            
+            devices = await bt_qc_tester.scan_devices()
+            if not devices:
+                self.log_queue.put("No Bluetooth devices found.")
+                messagebox.showinfo(_("Scan Result"), _("No Bluetooth devices found."))
+                return
+
+            selected_device = await self.select_bluetooth_device(devices)
+            
+            if selected_device:
+                self.log_queue.put(f"User selected: {selected_device.name} ({selected_device.address})")
+                self.set_captured_ble_details(selected_device.address, selected_device.name)
+            else:
+                self.log_queue.put("User cancelled selection.")
+
+        except Exception as e:
+            self.log_queue.put(f"Error during manual selection: {e}")
+            messagebox.showerror("Error", f"An error occurred: {e}")
+
     async def run_bluetooth_qc(self):
-        """Async function to run Bluetooth QC testing"""
+        """Async function to run Bluetooth QC testing with retries and detailed logging."""
+        if not self.captured_mac:
+            messagebox.showerror(_("Error"), _("No Bluetooth MAC captured. Please run a 'Testing' flash first."))
+            return
+
         try:
             bt_qc_tester = get_bluetooth_qc_tester()
             bt_qc_tester.set_log_queue(self.log_queue)
 
-            self.log_queue.put("🟦 Starting Bluetooth QC testing mode...")
-
-            # Scan for devices
-            devices = await bt_qc_tester.scan_devices()
-
-            if not devices:
-                self.log_queue.put("❌ No compatible Bluetooth devices found")
+            self.log_queue.put(f"🟦 Starting Bluetooth QC for MAC: {self.captured_mac}...")
+            
+            self.log_queue.put("⏳ Waiting for device to signal it's ready for connection...")
+            if not self.ble_ready_event.wait(timeout=15):
+                self.log_queue.put("❌ Timed out waiting for BLE ready signal from device.")
                 self.root.after(0, self.stop_bluetooth_qc)
                 return
 
-            # Show device selection dialog
-            selected_device = await self.select_bluetooth_device(devices)
-            if not selected_device:
-                self.log_queue.put("❌ No device selected")
+            found_device = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                self.log_queue.put(f"🔎 Attempt {attempt + 1}/{max_retries}: Scanning for device with MAC {self.captured_mac}...")
+                try:
+                    devices = await bleak.BleakScanner.discover(timeout=7.0)
+                    self.log_queue.put(f"   - Found {len(devices)} BLE devices in this scan.")
+                    for i, d in enumerate(devices):
+                        self.log_queue.put(f"     - Device {i}: {d.name or 'Unknown'} ({d.address})")
+                    
+                    for device in devices:
+                        # Compare MAC addresses (case-insensitive)
+                        if device.address.upper() == self.captured_mac.upper():
+                            found_device = device
+                            self.log_queue.put(f"🎯 MAC Address match found: {device.name} at {device.address}")
+                            break
+                    if found_device:
+                        break
+                except Exception as e:
+                    self.log_queue.put(f"   - Error during scan attempt {attempt + 1}: {e}")
+                
+                if not found_device:
+                    self.log_queue.put(f"   - Device not found. Retrying in 2 seconds...")
+                    await asyncio.sleep(2)
+
+            if not found_device:
+                self.log_queue.put(f"❌ CRITICAL: Device with MAC '{self.captured_mac}' not found after {max_retries} attempts.")
                 self.root.after(0, self.stop_bluetooth_qc)
                 return
 
-            # Connect to device
-            connected = await bt_qc_tester.connect_device(selected_device.address)
+            self.log_queue.put(f"✅ Found device. Attempting to connect to {found_device.address}...")
+            connected = await bt_qc_tester.connect_device(found_device.address)
             if not connected:
                 self.log_queue.put("❌ Failed to connect to device")
                 self.root.after(0, self.stop_bluetooth_qc)
                 return
 
-            self.log_queue.put("✅ Connected to Bluetooth device")
+            self.log_queue.put("✅ Connected to Bluetooth device. Waiting for services to stabilize...")
+            await asyncio.sleep(1.0) # Added delay for stability
 
-            # Run microphone balance test
-            test_result = await bt_qc_tester.run_test(0)  # Test index 0: Mic L/R Balance
+            # Run microphone balance test with retry logic
+            test_result = False
+            for i in range(2): # Try up to 2 times
+                test_result = await bt_qc_tester.run_test(0)  # Test index 0: Mic L/R Balance
+                if test_result:
+                    break
+                self.log_queue.put(f"⚠️ Test command failed to send on attempt {i+1}. Retrying after 1s...")
+                await asyncio.sleep(1.0)
+
+            # Get MAC address
+            mac_address = found_device.address
+            self.log_queue.put(f"MAC Address: {mac_address}")
 
             if test_result:
                 # Wait for results (they come via notifications)
@@ -890,8 +1067,8 @@ class FlasherApp:
                     if FIREBASE_AVAILABLE:
                         try:
                             device_info = {
-                                'name': selected_device.name or 'Unknown',
-                                'address': selected_device.address
+                                'name': found_device.name or 'Unknown',
+                                'address': found_device.address
                             }
                             if store_qc_results(device_info, results):
                                 self.log_queue.put("💾 QC results stored in Firebase database")
@@ -910,6 +1087,10 @@ class FlasherApp:
         except Exception as e:
             self.log_queue.put(f"❌ Bluetooth QC error: {e}")
         finally:
+            # Store the session log to Firebase
+            if FIREBASE_AVAILABLE and self.session_logs:
+                store_session_log(self.session_logs)
+            
             self.root.after(0, self.stop_bluetooth_qc)
 
     async def select_bluetooth_device(self, devices):
@@ -1124,6 +1305,52 @@ class FlasherApp:
         # The next time the interface is redrawn, it will show the new language
 
 
+
+class VersionDialog:
+    def __init__(self, parent, colors):
+        self.top = tk.Toplevel(parent)
+        self.top.title(_("Enter Hardware Version"))
+        self.top.configure(bg=colors['bg'])
+        self.top.resizable(False, False)
+        self.colors = colors
+        self.version = ""
+
+        # Load and display image
+        try:
+            img_path = "pcb_example.png"
+            img = Image.open(img_path)
+            img.thumbnail((400, 400))
+            self.photo = ImageTk.PhotoImage(img)
+            img_label = tk.Label(self.top, image=self.photo, bg=colors['bg'])
+            img_label.pack(pady=10, padx=20)
+        except FileNotFoundError:
+            tk.Label(self.top, text=_("Image not found."), bg=colors['bg'], fg=colors['text']).pack(pady=10)
+
+        # Label
+        label = tk.Label(self.top, text=_("Please enter the version number printed on the PCB:"), font=("Segoe UI", 12), bg=colors['bg'], fg=colors['text'])
+        label.pack(pady=(10, 5), padx=20)
+
+        # Entry
+        self.entry = tk.Entry(self.top, font=("Consolas", 14), width=15, bg=colors['entry_bg'], fg=colors['entry_fg'], insertbackground=colors['text'])
+        self.entry.pack(pady=10)
+        self.entry.focus_set()
+
+        # Button
+        button = tk.Button(self.top, text=_("OK"), font=("Segoe UI", 12, "bold"), bg=colors['success_btn'], fg=colors['bg'], command=self.ok)
+        button.pack(pady=10, padx=20, fill=tk.X)
+
+        self.top.transient(parent)
+        self.top.grab_set()
+        self.top.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.entry.bind("<Return>", self.ok)
+
+    def ok(self, event=None):
+        self.version = self.entry.get()
+        self.top.destroy()
+
+    def cancel(self):
+        self.version = ""
+        self.top.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()

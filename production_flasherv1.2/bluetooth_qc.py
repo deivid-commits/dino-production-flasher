@@ -149,7 +149,7 @@ class BluetoothQCTester:
         try:
             # Decode JSON data
             message = data.decode('utf-8', errors='ignore')
-            self.log('info', _("Received Bluetooth message ({} bytes)").format(len(message)))
+            self.log('info', f"[BLE RX] {message}")
 
             try:
                 json_data = json.loads(message)
@@ -248,18 +248,16 @@ class BluetoothQCTester:
             return False
 
         try:
-            command_data = {
-                'id': f"{command}_{int(time.time())}",
-                'type': command,
-                'payload': payload or {}
-            }
-
-            json_command = json.dumps(command_data, ensure_ascii=False)
+            # Construct the JSON string manually to avoid any potential issues with json.dumps
+            command_id = f"{command}_{int(time.time())}"
+            payload_str = json.dumps(payload or {})
+            
+            json_command = f'{{"id":"{command_id}","type":"{command}","payload":{payload_str}}}'
             command_bytes = json_command.encode('utf-8')
 
+            self.log('info', f"[BLE TX] {json_command}")
             await self.client.write_gatt_char(self.QA_CONTROL_UUID, command_bytes)
 
-            self.log('info', _("Command sent: {}").format(command))
             return True
 
         except Exception as e:

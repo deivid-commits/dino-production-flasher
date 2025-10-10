@@ -42,6 +42,7 @@ class FirebaseDB:
             else:
                 # Try common Firebase credentials locations
                 possible_paths = [
+                    'production_flasherv1.2/firebase-credentials.json',
                     'firebase-credentials.json',
                     'credentials.json',
                     'firebase-adminsdk.json',
@@ -98,8 +99,9 @@ class FirebaseDB:
                 'device_address': device_info.get('address', 'Unknown')
             }
 
-            # Store in 'qc_results' collection
-            doc_ref = self.db.collection('qc_results').document()
+            # Use a timestamp-based document ID for easy sorting
+            doc_id = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S-%f')
+            doc_ref = self.db.collection('qc_results').document(doc_id)
             doc_ref.set(doc_data)
 
             print(f"QC results stored with ID: {doc_ref.id}")
@@ -130,8 +132,9 @@ class FirebaseDB:
                 'session_id': f"flash_{int(time.time())}"
             }
 
-            # Store in 'flash_logs' collection
-            doc_ref = self.db.collection('flash_logs').document()
+            # Use a timestamp-based document ID for easy sorting
+            doc_id = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S-%f')
+            doc_ref = self.db.collection('flash_logs').document(doc_id)
             doc_ref.set(doc_data)
 
             print(f"Flash log stored with ID: {doc_ref.id}")
@@ -139,6 +142,33 @@ class FirebaseDB:
 
         except Exception as e:
             print(f"Error storing flash log: {e}")
+            return False
+
+    def store_session_log(self, session_logs: List[str]) -> bool:
+        """Store a full session log in Firebase."""
+        if not self.initialized or not self.db:
+            print(_("Firebase not initialized"))
+            return False
+
+        try:
+            # Join logs into a single string
+            log_content = "\n".join(session_logs)
+
+            doc_data = {
+                'timestamp': firestore.SERVER_TIMESTAMP,
+                'log_content': log_content,
+                'session_id': f"session_{int(time.time())}"
+            }
+
+            doc_id = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S-%f')
+            doc_ref = self.db.collection('logs').document(doc_id)
+            doc_ref.set(doc_data)
+
+            print(f"Session log stored with ID: {doc_ref.id}")
+            return True
+
+        except Exception as e:
+            print(f"Error storing session log: {e}")
             return False
 
     def get_qc_history(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -250,6 +280,10 @@ def store_flash_log(device_info: Dict[str, Any], flash_result: Dict[str, Any]) -
     """Store flash log in Firebase"""
     return firebase_db.store_flash_log(device_info, flash_result)
 
+def store_session_log(session_logs: List[str]) -> bool:
+    """Store session log in Firebase"""
+    return firebase_db.store_session_log(session_logs)
+
 if __name__ == "__main__":
     # Command line interface for Firebase setup
     import sys
@@ -303,11 +337,35 @@ if __name__ == "__main__":
             else:
                 print("❌ Failed to store test QC results")
 
+        elif command == "init_and_test":
+            print("--- Initializing and Testing Firebase ---")
+            if firebase_db.initialize():
+                print("✅ Firebase initialized successfully.")
+                # Test data
+                test_device = {
+                    'name': 'Test Device',
+                    'address': 'AA:BB:CC:DD:EE:FF'
+                }
+                test_results = [
+                    {
+                        'name': 'Mic L/R Balance',
+                        'status': 'pass',
+                        'details': 'L: 5000 RMS, R: 4950 RMS'
+                    }
+                ]
+                if firebase_db.store_qc_results(test_device, test_results):
+                    print("✅ Test QC results stored successfully in Firebase.")
+                else:
+                    print("❌ Failed to store test QC results.")
+            else:
+                print("❌ Firebase initialization failed.")
+
         else:
-            print("Usage: python firebase_db.py [setup|init|test] [args...]")
+            print("Usage: python firebase_db.py [setup|init|test|init_and_test] [args...]")
             print("  setup <project_id>  - Setup Firebase project")
             print("  init <cred_path> <project_id>  - Initialize Firebase")
             print("  test                - Test Firebase connection")
+            print("  init_and_test       - Initialize and send a test log")
 
     else:
         print("DinoCore Firebase Database Module")
