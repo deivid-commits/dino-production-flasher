@@ -57,13 +57,15 @@ class FirebaseLogsDebugger:
                 print("❌ Firebase credentials not found. Please provide credentials file.")
                 return False
 
-            # Initialize Firebase app with a unique name to avoid conflicts
-            app_name = 'dino_debugger_app'
+            # Initialize Firebase app (use default app)
             try:
-                initialize_app(cred, name=app_name)
-            except ValueError:
-                # App already exists, get the existing one
-                firebase_admin.get_app(app_name)
+                initialize_app(cred)
+            except ValueError as e:
+                if "already exists" in str(e):
+                    # App already exists, that's fine
+                    pass
+                else:
+                    raise
 
             # Get Firestore client
             self.db = firestore.client()
@@ -183,11 +185,11 @@ class FirebaseLogsDebugger:
         print(f"🆔 {log_id}")
         print(f"⏰ {timestamp_str}")
 
-        if collection == 'session_logs':
+        if log.get('collection') == 'logs':
             log_content = log.get('log_content', 'No content')
             print(f"📝 Content: {log_content[:200]}..." if len(log_content) > 200 else f"📝 Content: {log_content}")
 
-        elif collection == 'flash_logs':
+        elif log.get('collection') == 'flash_logs':
             success = log.get('success', False)
             mode = log.get('mode', 'unknown')
             hardware_version = log.get('hardware_version', 'unknown')
@@ -202,7 +204,7 @@ class FirebaseLogsDebugger:
             if error:
                 print(f"🚨 Error: {error}")
 
-        elif collection == 'qc_results':
+        elif log.get('collection') == 'qc_results':
             device_name = log.get('device_name', 'Unknown')
             device_address = log.get('device_address', 'Unknown')
             total_tests = log.get('total_tests', 0)
@@ -254,11 +256,6 @@ def main():
 
     # Display logs
     debugger.display_logs(logs_data)
-
-    # Export to file
-    export_choice = input("\n💾 Export logs to file? (y/N): ").strip().lower()
-    if export_choice in ['y', 'yes']:
-        debugger.export_logs_to_file(logs_data)
 
     print("\n✅ Debugging session completed")
     return 0
