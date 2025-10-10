@@ -55,5 +55,3 @@ echo %NEW_VERSION% > version.txt
 echo.
 echo --- Proceso completado ---
 echo Versión %NEW_VERSION% ha sido creada y subida a GitHub.
-
-pause
