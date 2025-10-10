@@ -36,14 +36,21 @@ git add .
 git commit -m "%COMMIT_MESSAGE%"
 git push
 
-REM 6. Crear tag de Git y release en GitHub
+REM 6. Crear archivo ZIP y release en GitHub
 echo.
-echo --- Creando release en GitHub ---
+echo --- Creando archivo ZIP del proyecto ---
+set ZIP_FILENAME=dino-production-flasher-v%NEW_VERSION%.zip
+tar -acf %ZIP_FILENAME% --exclude=".git" --exclude="backup" --exclude="*.zip" --exclude="*.log" --exclude="production_firmware" --exclude="testing_firmware" .
+echo.
+echo --- Creando release en GitHub y subiendo el ZIP ---
 git tag v%NEW_VERSION%
 git push origin v%NEW_VERSION%
-gh release create v%NEW_VERSION% --title "Release v%NEW_VERSION%" --notes "%COMMIT_MESSAGE%"
+gh release create v%NEW_VERSION% --title "Release v%NEW_VERSION%" --notes "%COMMIT_MESSAGE%" %ZIP_FILENAME%
 
-REM 7. Actualizar el archivo de versión
+REM 7. Limpiar el archivo ZIP local
+del %ZIP_FILENAME%
+
+REM 8. Actualizar el archivo de versión
 echo %NEW_VERSION% > version.txt
 echo.
 echo --- Proceso completado ---
