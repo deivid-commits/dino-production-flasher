@@ -528,22 +528,17 @@ class FlasherApp:
         """Start comprehensive logging to Firebase for debugging."""
         try:
             # Send initial startup log
-            self.log_queue.put(("Firebase", "🚀 Starting DinoCore Production Flasher v1.2.14"))
+            self.log_queue.put(("Firebase", "🚀 Starting DinoCore Production Flasher v1.2.13"))
             self.log_queue.put(("Firebase", f"📍 Working directory: {os.getcwd()}"))
             self.log_queue.put(("Firebase", f"🐍 Python version: {sys.version}"))
 
-            # Try to initialize Firebase if available (only if not already initialized)
+            # Try to initialize Firebase if available
             if FIREBASE_AVAILABLE:
                 try:
-                    # Check if already initialized by trying to get the global instance
-                    firebase_instance = get_firebase_db()
-                    if not firebase_instance.initialized:
-                        if init_firebase_with_credentials():
-                            self.log_queue.put(("Firebase", "✅ Firebase initialized successfully"))
-                        else:
-                            self.log_queue.put(("Firebase", "⚠️ Firebase initialization failed"))
+                    if init_firebase_with_credentials():
+                        self.log_queue.put(("Firebase", "✅ Firebase initialized successfully"))
                     else:
-                        self.log_queue.put(("Firebase", "✅ Firebase already initialized"))
+                        self.log_queue.put(("Firebase", "⚠️ Firebase initialization failed"))
                 except Exception as e:
                     self.log_queue.put(("Firebase", f"❌ Firebase error: {e}"))
             else:
