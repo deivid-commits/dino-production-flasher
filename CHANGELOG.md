@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.20] - 2025-10-11
+
+### 🚀 Added
+- **Logging Wrapper System**: New `flasher_logger.py` that ensures logs are captured immediately before any app initialization
+- **Guaranteed Firebase Logging**: Logs are now saved to Firebase BEFORE the GUI loads, ensuring they work even if app crashes
+- **Enhanced Installation**: Improved `install_dependencies.bat` with better error handling and verification
+- **Automatic Logging Flow**: `start_gui.bat` → `auto_updater_launcher.py` → `flasher_logger.py` → Firebase logs + GUI
+
+### 🔧 Changed
+- **Startup Sequence**: Modified startup to use logging wrapper for guaranteed log capture
+- **Update Process**: Enhanced update detection to work with version increments
+
+### 📦 Dependencies
+- **No new dependencies**: Existing dependency management maintained
+
 ## [1.2.0] - 2025-10-06
 
 ### 🚀 Added
@@ -60,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ESP32-S3 Support**: Full support for ESP32-S3 flashing operations
 - **Cross-Platform**: Windows, macOS, and Linux compatibility
 
-### 📋 Dependencies
+### 📦 Dependencies
 - `esptool>=4.0.0`
 - `pyserial>=3.5`
 - `requests>=2.25.0`
@@ -83,8 +98,8 @@ This project uses [Semantic Versioning](https://semver.org/):
 ## Release Process
 1. Update version in `version.json`
 2. Update `CHANGELOG.md` with new changes
-3. Create Git tag: `git tag v1.2.0`
-4. Push tag: `git push origin v1.2.0`
+3. Create Git tag: `git tag v1.2.20`
+4. Push tag: `git push origin v1.2.20`
 5. GitHub Actions automatically creates release with ZIP asset
 6. Update system pulls latest release automatically
 
