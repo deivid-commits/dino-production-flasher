@@ -250,6 +250,8 @@ class DinoUpdater:
                 'auto_flasher.py',
                 'download_helper.py',
                 'updater.py',
+                'flasher_logger.py',
+                'auto_updater_launcher.py',
                 'requirements.txt',
                 'README.md'
             }

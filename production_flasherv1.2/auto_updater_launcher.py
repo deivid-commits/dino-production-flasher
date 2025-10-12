@@ -37,6 +37,22 @@ def main():
                 print("   You can manually update later with: python updater.py update")
             else:
                 print("✅ Updates installed successfully!")
+                print("🔄 Application updated! restarting with logging wrapper...")
+
+                # Restart the application with the new logging wrapper
+                import time
+                print("⏳ Waiting 2 seconds for files to settle...")
+                time.sleep(2)
+
+                print("🔄 Starting updated application with logging...")
+                try:
+                    # Launch the new logging wrapper
+                    subprocess.run([sys.executable, 'flasher_logger.py'], cwd=os.path.dirname(__file__))
+                    print("✅ Application restarted successfully with logging wrapper!")
+                except Exception as e:
+                    print(f"⚠️  Could not restart with logging wrapper: {e}")
+                    print("🚀 Starting standard application...")
+                return  # Exit after successful update + restart
 
             print("🚀 Starting application...")
 
