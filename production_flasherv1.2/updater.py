@@ -243,28 +243,41 @@ class DinoUpdater:
             print("🔄 Installing update files...")
 
             # Files to update (include ALL logging-critical files)
-            update_files = {
-                # Core application files
-                'dino_console.py',
-                'gui_flasher.py',
-                'partner_flasher.py',
-                'auto_flasher.py',
-                'download_helper.py',
-                'updater.py',
+            # GET ALL FILES FROM RELEASE - not just predefined ones
+            update_files = set()
 
-                # CRITICAL: Logging system files
-                'flasher_logger.py',
-                'auto_updater_launcher.py',
-                'start_gui.bat',
+            # Scan all files in the production_flasherv1.2 directory from the release
+            for root, dirs, files in os.walk(source_dir):
+                for file in files:
+                    # Skip certain files/directories
+                    if any(skip in os.path.join(root, file) for skip in [
+                        '__pycache__', 'temp_ble_test.py', 'ble_connection_test.py',
+                        'ble_service_test.py', 'ble_diagnostic_test.py', 'session.log',
+                        'firebase-credentials.json', '.git', 'backup', 'testing_firmware'
+                    ]):
+                        continue
 
-                # Optional: Additional logging files (may not exist in old versions)
-                'debug_firebase_logs.py',
-                'test_initial_logs.py',
+                    # Get relative path from production_flasherv1.2 directory
+                    rel_path = os.path.relpath(os.path.join(root, file), source_dir)
+                    update_files.add(rel_path)
 
-                # Dependencies and documentation
-                'requirements.txt',
-                'README.md'
+            print(f"   📂 Found {len(update_files)} files to potentially update")
+
+            # But ensure critical files are prioritized
+            critical_files = {
+                'production_flasherv1.2/flasher_logger.py',
+                'production_flasherv1.2/auto_updater_launcher.py',
+                'production_flasherv1.2/start_gui.bat',
+                'production_flasherv1.2/start_with_logging.bat',
+                'production_flasherv1.2/install_everything.bat',
+                'production_flasherv1.2/README_START.md',
+                'production_flasherv1.2/debug_firebase_logs.py',
+                'production_flasherv1.2/clean_firebase_logs.py',
+                'version.json'
             }
+
+            # Add critical files even if not in release (safety)
+            update_files.update(critical_files)
 
             updated_files = []
 
