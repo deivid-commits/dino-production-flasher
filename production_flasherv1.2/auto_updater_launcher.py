@@ -71,10 +71,10 @@ def main():
         print(f"⚠️  Logging wrapper failed: {e}")
         print("🚀 Starting standard GUI...")
         try:
-            subprocess.run([sys.executable, 'gui_flasher.py'], cwd=os.path.dirname(__file__))
+            subprocess.run([sys.executable, 'flasher_logger.py'], cwd=os.path.dirname(__file__))
         except Exception as e2:
             print(f"❌ Could not start application: {e2}")
-            print("🚀 Please run manually: python gui_flasher.py")
+            print("🚀 Please run manually: python flasher_logger.py")
             print("   or use the start_gui.bat file")
 
 if __name__ == "__main__":

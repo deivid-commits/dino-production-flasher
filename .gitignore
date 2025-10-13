@@ -1,5 +1,5 @@
-# Firebase credentials
-firebase-credentials.json
+# Firebase credentials (included in releases for remote logging)
+# firebase-credentials.json
 
 # Python cache
 __pycache__/
