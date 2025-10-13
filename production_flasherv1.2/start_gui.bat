@@ -5,10 +5,7 @@ cd /d "%~dp0"
 REM Auto-Updater Launcher and Logging Wrapper for DinoCore Production Flasher
 REM This script handles the complete startup sequence with automatic updates
 
-echo Starting DinoCore Production Flasher...
-echo.
-
-REM Run the auto-updater launcher (checks and applies updates, then Restart if needed)
+REM Run the auto-updater launcher (checks and applies updates, then starts logging)
 python auto_updater_launcher.py
 
 echo.
