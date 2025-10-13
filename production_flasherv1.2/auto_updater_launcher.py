@@ -60,22 +60,15 @@ def main():
         print(f"⚠️  Could not check for updates: {e}")
         print("🚀 Starting application (update check skipped)...")
 
-    # Try to launch the logging wrapper if available, otherwise launch GUI directly
+    # Always launch the logging wrapper (unified execution path)
     print("✅ Update process completed!")
-    print("🚀 Attempting to start application with logging...")
+    print("🚀 Starting application with logging...")
 
     try:
-        # First try logging wrapper
         subprocess.run([sys.executable, 'flasher_logger.py'], cwd=os.path.dirname(__file__))
     except Exception as e:
-        print(f"⚠️  Logging wrapper failed: {e}")
-        print("🚀 Starting standard GUI...")
-        try:
-            subprocess.run([sys.executable, 'flasher_logger.py'], cwd=os.path.dirname(__file__))
-        except Exception as e2:
-            print(f"❌ Could not start application: {e2}")
-            print("🚀 Please run manually: python flasher_logger.py")
-            print("   or use the start_gui.bat file")
+        print(f"❌ Could not start application: {e}")
+        print("🚀 Please run manually: python flasher_logger.py")
 
 if __name__ == "__main__":
     main()
