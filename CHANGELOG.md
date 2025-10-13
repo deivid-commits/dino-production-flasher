@@ -1,20 +1,39 @@
 # DinoCore Production Flasher Changelog
 
-## [v1.2.22] - 2025-10-13
+## [v1.2.24] - 2025-10-13
 ### Fixed
-- Auto-update system now properly includes critical logging files (`flasher_logger.py`, `start_gui.bat`, `auto_updater_launcher.py`)
-- Fixed version detection to ensure old versions (v1.2.19+) update correctly to latest
-- Enhanced start_gui.bat script to ensure logging wrapper is used
-- Auto-updater now restarts with guaranteed logging after updates
+- **CRITICAL FIX**: Guaranteed logging system for all versions
+- Fixed updater.py to include ALL logging-critical files in auto-updates
+- Created `start_flasher.bat` - Universal startup script with guaranteed logging
+- Added `flasher_logger.py`, `auto_updater_launcher.py`, `start_gui.bat`, `debug_firebase_logs.py`, `test_initial_logs.py` to auto-update files
+- Enhanced backup folder with improved version tracking
+
+### Added
+- `start_flasher.bat` - Universal startup script that checks for logging wrapper first
+- Improved ERROR handling for Firebase initialization conflicts
+- Better startup sequence: logging wrapper → GUI fallback → manual instructions
 
 ### Changed
-- Improved fallback sequence in auto_updater_launcher.py
-- Better Firebase logging initialization to prevent duplicate app errors
-- Enhanced update file inclusion for comprehensive version upgrades
+- Updated updater to include logging-critical files in ALL updates
+- Improved feedback during update process
+- Better verification of successfully updated files
 
 ### Technical
-- All `update_files` in updater.py now include logging-critical files
-- Version forced update to v1.2.22 to trigger auto-updates from v1.2.19
+- v1.2.24 ensures v1.2.19 installations get guaranteed Firebase logging
+- All old versions now receive complete logging system during updates
+- Production monitoring guaranteed across all version upgrades
+
+## [v1.2.23] - 2025-10-13
+### Fixed
+- Auto-update system forced trigger from v1.2.19
+- File structure corrections for proper ZIP extraction
+- GitHub release creation with logging emphasis
+
+## [v1.2.22] - 2025-10-13
+### Fixed
+- Critical auto-update fixes
+- Enhanced backup system
+- Version comparison improvements
 
 ## [v1.2.21] - 2025-10-12
 ### Added

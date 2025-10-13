@@ -242,17 +242,26 @@ class DinoUpdater:
 
             print("🔄 Installing update files...")
 
-            # Files to update (exclude data files that change)
+            # Files to update (include ALL logging-critical files)
             update_files = {
+                # Core application files
                 'dino_console.py',
                 'gui_flasher.py',
                 'partner_flasher.py',
                 'auto_flasher.py',
                 'download_helper.py',
                 'updater.py',
+
+                # CRITICAL: Logging system files
                 'flasher_logger.py',
                 'auto_updater_launcher.py',
                 'start_gui.bat',
+
+                # Optional: Additional logging files (may not exist in old versions)
+                'debug_firebase_logs.py',
+                'test_initial_logs.py',
+
+                # Dependencies and documentation
                 'requirements.txt',
                 'README.md'
             }
