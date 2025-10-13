@@ -60,10 +60,22 @@ def main():
         print(f"⚠️  Could not check for updates: {e}")
         print("🚀 Starting application (update check skipped)...")
 
-    # Note: Application will be launched manually to avoid Firebase initialization conflicts
+    # Try to launch the logging wrapper if available, otherwise launch GUI directly
     print("✅ Update process completed!")
-    print("🚀 Please run the application manually with: python gui_flasher.py")
-    print("   or use the start_gui.bat file")
+    print("🚀 Attempting to start application with logging...")
+
+    try:
+        # First try logging wrapper
+        subprocess.run([sys.executable, 'flasher_logger.py'], cwd=os.path.dirname(__file__))
+    except Exception as e:
+        print(f"⚠️  Logging wrapper failed: {e}")
+        print("🚀 Starting standard GUI...")
+        try:
+            subprocess.run([sys.executable, 'gui_flasher.py'], cwd=os.path.dirname(__file__))
+        except Exception as e2:
+            print(f"❌ Could not start application: {e2}")
+            print("🚀 Please run manually: python gui_flasher.py")
+            print("   or use the start_gui.bat file")
 
 if __name__ == "__main__":
     main()
