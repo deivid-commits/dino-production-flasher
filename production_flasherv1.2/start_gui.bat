@@ -1,24 +1,21 @@
 @echo off
-REM Change directory to the script's location to ensure all paths are correct
+REM Production Startup Script with Guaranteed Firebase Logging
 cd /d "%~dp0"
 
-REM Auto-Updater Launcher and Logging Wrapper for DinoCore Production Flasher
-REM This script handles the complete startup sequence with automatic updates
-
-REM Run the auto-updater launcher (checks and applies updates, then starts logging)
-python auto_updater_launcher.py
-
-echo.
-echo If no update was needed, starting logging wrapper manually...
+echo Starting DinoCore Production Flasher v1.2.25...
 echo.
 
-REM If we reach here, no update was needed or update failed - start logging manually
+REM Always start with guaranteed logging first
+echo Initializing logging system...
 python flasher_logger.py
 
-REM If logging wrapper fails or isn't available, fallback to direct GUI
+REM If logging fails, fallback to GUI with error message
 if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo Logging wrapper not available, starting standard GUI...
+    echo WARNING: Logging system failed to initialize.
+    echo Starting GUI without logging...
     echo.
     python gui_flasher.py
+) else (
+    echo Logging system initialized successfully.
+    echo GUI will be launched by logging system automatically.
 )
