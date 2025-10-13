@@ -1,12 +1,12 @@
 {
-  "version": "1.2.19",
-  "last_updated": "2025-10-10T16:21:06.000000",
+  "version": "1.2.22",
+  "last_updated": "2025-10-13T12:33:53.000000",
   "metadata": {
-    "updated_from": "1.2.18",
-    "updated_at": "2025-10-10T16:21:06.000000",
+    "updated_from": "1.2.19",
+    "updated_at": "2025-10-13T12:33:53.000000",
     "release_info": {
-      "name": "Release v1.2.19",
-      "published_at": "2025-10-10T21:21:06Z"
+      "name": "Release v1.2.22",
+      "published_at": "2025-10-13T19:33:53Z"
     }
   }
 }
