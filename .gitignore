@@ -18,3 +18,4 @@ temp_efuse_*.bin
 
 # Release ZIP files (created during release process)
 *.zip
+dino-production-flasher-v*.zip
