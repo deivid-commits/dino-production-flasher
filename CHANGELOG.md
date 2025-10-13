@@ -5,17 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.20] - 2025-10-11
+## [1.2.21] - 2025-10-12
 
 ### 🚀 Added
-- **Logging Wrapper System**: New `flasher_logger.py` that ensures logs are captured immediately before any app initialization
-- **Guaranteed Firebase Logging**: Logs are now saved to Firebase BEFORE the GUI loads, ensuring they work even if app crashes
-- **Enhanced Installation**: Improved `install_dependencies.bat` with better error handling and verification
-- **Automatic Logging Flow**: `start_gui.bat` → `auto_updater_launcher.py` → `flasher_logger.py` → Firebase logs + GUI
+- **Auto-Restart After Update**: `auto_updater_launcher.py` now automatically restarts application with logging wrapper after successful updates
+- **Complete Startup Flow**: `start_gui.bat` → Auto-update → Logging wrapper → GUI with guaranteed Firebase logging
+- **Enhanced Update System**: Includes `flasher_logger.py` and `auto_updater_launcher.py` in automatic update process
+- **Robust Fallback Sequence**: If logging wrapper fails, falls back to standard GUI
 
 ### 🔧 Changed
-- **Startup Sequence**: Modified startup to use logging wrapper for guaranteed log capture
-- **Update Process**: Enhanced update detection to work with version increments
+- **Auto-Updater Behavior**: After update completion, automatically launches logging wrapper instead of requiring manual restart
+- **Startup Script**: Enhanced `start_gui.bat` with better sequence handling and error recovery
+- **Update Process**: Added critical logging components to the update manifest
+
+### � Security
+- **Guaranteed Log Capture**: All versions now automatically get Firebase logging capability through update system
+- **Crash-Safe Logging**: Updates ensure logs are captured before any GUI initialization, preventing log loss
 
 ### 📦 Dependencies
 - **No new dependencies**: Existing dependency management maintained
