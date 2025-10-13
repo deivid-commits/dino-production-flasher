@@ -15,3 +15,6 @@ testing_firmware/
 
 # Temporary files
 temp_efuse_*.bin
+
+# Release ZIP files (created during release process)
+*.zip
