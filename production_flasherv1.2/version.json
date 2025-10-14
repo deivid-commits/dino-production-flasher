@@ -1,0 +1,13 @@
+{
+  "version": "1.2.28",
+  "last_updated": "2025-10-13T21:48:00.000000",
+  "metadata": {
+    "updated_from": "1.2.24",
+    "updated_at": "2025-10-13T21:48:00.000000",
+    "release_info": {
+      "name": "Release v1.2.28 - Logging Capability for Remote Support",
+      "published_at": "2025-10-13T21:48:00Z",
+      "description": "Enable logging wrapper for remote debugging support in China installations"
+    }
+  }
+}
